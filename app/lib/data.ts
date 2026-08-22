@@ -134,7 +134,13 @@ function extractStandardTokens(text: string): string[] {
   if (!text) return [];
   const t = text.replace(/CCSS\.ELA-LITERACY\./gi, "").replace(/CCSS\.MATH\.CONTENT\./gi, "");
   const tokens: string[] = [];
-  const re1 = /\b([A-Za-z]{1,6}\.\d+(?:\.\d+){0,2}(?:-\d+)?)\b/g;
+  // Letter-prefix codes (RH, WH, ELD.PI, MP, RP, NS, EE, SP, G, etc.) are always
+  // uppercase in every real source document seen so far. Restricting to [A-Z]
+  // (rather than [A-Za-z]) avoids false positives where an ordinary lowercase
+  // word ends up glued directly to a following standard code with no space
+  // (e.g. source text reading "...use of fire.6.1.2. Identify..." should not
+  // be read as the code "fire.6.1.2").
+  const re1 = /\b([A-Z]{1,6}\.\d+(?:\.\d+){0,2}(?:-\d+)?)\b/g;
   let m;
   while ((m = re1.exec(t))) tokens.push(m[1]);
   const re2 = /\b(\d+\.\d+(?:-\d+)?)\b/g;
