@@ -2,7 +2,7 @@ import { notFound } from "next/navigation";
 import Breadcrumb from "../../../../components/Breadcrumb";
 import ReviewPanel from "../../../../components/ReviewPanel";
 import NotesPanel from "../../../../components/NotesPanel";
-import { schoolFromSlug, subjectFromSlug, getMap, computeUnitAlignment, computeInternalAlignment, computeTemplateCompleteness, getReviewsForUnit, getNotesForUnit } from "../../../../lib/data";
+import { schoolFromSlug, subjectFromSlug, getMap, computeUnitAlignment, computeInternalAlignment, computeTemplateCompleteness, getReviewsForUnit, getNotesForUnit, matchTargetStatementToCategory, findMatchingPriorityStandard } from "../../../../lib/data";
 import type { CurriculumRow } from "../../../../lib/types";
 
 export const dynamic = "force-dynamic";
@@ -43,6 +43,13 @@ function splitLearningTargets(text?: string): string[] {
   if (!text) return [];
   return text.split(/(?=I can\s)/).map((s) => s.trim()).filter(Boolean);
 }
+
+const CATEGORY_BADGE: Record<string, { abbrev: string; color: string; colorSoft: string }> = {
+  "Knowledge": { abbrev: "K", color: "var(--teal)", colorSoft: "var(--teal-soft)" },
+  "Reasoning": { abbrev: "R", color: "var(--gold)", colorSoft: "var(--gold-soft)" },
+  "Performance Skill": { abbrev: "PS", color: "var(--amber)", colorSoft: "var(--amber-soft)" },
+  "Product": { abbrev: "P", color: "var(--rust)", colorSoft: "var(--rust-soft)" },
+};
 
 interface ScoringBlock {
   header?: string;
@@ -293,7 +300,17 @@ TEMPLATE COMPLETENESS (checked against the district's required Unit Map template
           </div>
 
           <div className="panel">
-            <div className="panel-head"><h3>Unit Curriculum Map</h3></div>
+            <div className="panel-head">
+              <h3>Unit Curriculum Map</h3>
+              <div style={{ display: "flex", gap: 10, alignItems: "center", fontSize: 10.5, color: "var(--slate)" }}>
+                {Object.entries(CATEGORY_BADGE).map(([label, b]) => (
+                  <span key={label} style={{ display: "flex", alignItems: "center", gap: 3 }}>
+                    <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", minWidth: 15, height: 15, padding: "0 2px", borderRadius: 3, fontSize: 8.5, fontWeight: 700, background: b.colorSoft, color: b.color }}>{b.abbrev}</span>
+                    {label}
+                  </span>
+                ))}
+              </div>
+            </div>
             <div className="panel-body" style={{ padding: 0, overflowX: "auto" }}>
               {(um.curriculumRows || []).length === 0 ? <div className="empty" style={{ padding: "16px 18px" }}>No rows logged.</div> : (
                 <table style={{ minWidth: 1150 }}>
@@ -310,6 +327,7 @@ TEMPLATE COMPLETENESS (checked against the district's required Unit Map template
                     {um.curriculumRows.map((r, i) => {
                       const vocabTerms = parseVocabTerms(r.contentVocab);
                       const targetList = splitLearningTargets(r.targetOrder);
+                      const matchedPs = findMatchingPriorityStandard(r.standard, um.priorityStandards || []);
                       return (
                       <tr key={i}>
                         <td style={{ fontWeight: 600, fontSize: 12, verticalAlign: "top" }}>{r.standard}</td>
@@ -325,8 +343,30 @@ TEMPLATE COMPLETENESS (checked against the district's required Unit Map template
                         </td>
                         <td style={{ fontSize: 11.5, verticalAlign: "top" }}>
                           {targetList.length === 0 ? "—" : (
-                            <ul style={{ margin: 0, paddingLeft: 16 }}>
-                              {targetList.map((t, ti) => <li key={ti} style={{ marginBottom: 4 }}>{t}</li>)}
+                            <ul style={{ margin: 0, paddingLeft: 0, listStyle: "none" }}>
+                              {targetList.map((t, ti) => {
+                                const category = matchTargetStatementToCategory(t, matchedPs);
+                                const badge = category ? CATEGORY_BADGE[category] : null;
+                                return (
+                                  <li key={ti} style={{ marginBottom: 5, paddingLeft: 22, position: "relative" }}>
+                                    <span
+                                      title={category || "Doesn't match any deconstructed target for this standard"}
+                                      style={{
+                                        position: "absolute", left: 0, top: 0.5,
+                                        display: "inline-flex", alignItems: "center", justifyContent: "center",
+                                        minWidth: 15, height: 15, padding: "0 2px", borderRadius: 3,
+                                        fontSize: 8.5, fontWeight: 700, lineHeight: 1,
+                                        background: badge ? badge.colorSoft : "var(--paper-dim)",
+                                        color: badge ? badge.color : "var(--slate)",
+                                        border: badge ? "none" : "1px dashed var(--line)",
+                                      }}
+                                    >
+                                      {badge ? badge.abbrev : "?"}
+                                    </span>
+                                    {t}
+                                  </li>
+                                );
+                              })}
                             </ul>
                           )}
                         </td>

@@ -1,5 +1,5 @@
 import { sql } from "@vercel/postgres";
-import type { SubjectMap, Unit, UnitMap } from "./types";
+import type { SubjectMap, Unit, UnitMap, PriorityStandardDeconstruction, LearningTargets } from "./types";
 
 export const SCHOOLS = ["TEACH Prep", "TEACH Academy", "TEACH Tech"];
 export const GRADES = ["K", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12"];
@@ -513,4 +513,44 @@ export function computeProjectionMapCompleteness(units: Unit[]): ProjectionCompl
     }
   });
   return { totalUnits: units.length, unitsWithIssues };
+}
+
+// --- Curriculum Map Learning Target labeling: matches each individual "I can"
+// statement in a curriculum row's Learning Targets (targetOrder) field back
+// to the specific deconstruction category (Knowledge/Reasoning/Performance
+// Skill/Product) it was originally written under, by comparing the actual
+// statement text - no new data is stored, this just traces what's already
+// there back to its source. A statement that doesn't match any category
+// either came from a different standard's targets, or was written directly
+// into the curriculum map without being deconstructed first - both worth
+// surfacing rather than silently leaving unlabeled. ---
+const TARGET_CATEGORY_FIELDS: { key: keyof LearningTargets; label: string }[] = [
+  { key: "knowledge", label: "Knowledge" },
+  { key: "reasoning", label: "Reasoning" },
+  { key: "performanceSkill", label: "Performance Skill" },
+  { key: "product", label: "Product" },
+];
+
+function normalizeStatement(s: string): string {
+  return s.trim().replace(/\s+/g, " ").replace(/\.+$/, "").toLowerCase();
+}
+
+export function splitIntoStatements(text?: string): string[] {
+  if (!text) return [];
+  return text.split(/(?=I can\s)/).map((s) => s.trim()).filter(Boolean);
+}
+
+export function matchTargetStatementToCategory(statement: string, ps: PriorityStandardDeconstruction | undefined): string | null {
+  if (!ps || !ps.targets) return null;
+  const normalizedStatement = normalizeStatement(statement);
+  for (const { key, label } of TARGET_CATEGORY_FIELDS) {
+    const fragments = splitIntoStatements(ps.targets[key]).map(normalizeStatement);
+    if (fragments.includes(normalizedStatement)) return label;
+  }
+  return null;
+}
+
+export function findMatchingPriorityStandard(rowStandardText: string, priorityStandards: PriorityStandardDeconstruction[]): PriorityStandardDeconstruction | undefined {
+  const rowCodes = normalizeCodes(rowStandardText || "");
+  return priorityStandards.find((ps) => normalizeCodes(ps.code || "").some((c) => rowCodes.includes(c)));
 }
