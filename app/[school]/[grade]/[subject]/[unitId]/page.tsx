@@ -123,7 +123,7 @@ ALIGNMENT CHECK, Projection Map vs Unit Map (already computed automatically): ${
 INTERNAL UNIT MAP ALIGNMENT, within the Unit Map's own sections (already computed automatically): ${[
   internalAlign.priorityMissingFromCurriculumMap.length ? `Chosen priority standard(s) never added to the Unit Curriculum Map: ${internalAlign.priorityMissingFromCurriculumMap.join(", ")}` : "",
   internalAlign.typeTargetMismatches.length ? internalAlign.typeTargetMismatches.map((m) => `${m.code} has ${m.categories.join("/")} target(s) written but type marking omits ${m.categories.length > 1 ? "them" : "it"}`).join("; ") : "",
-  internalAlign.verbCategoryMismatches.length ? internalAlign.verbCategoryMismatches.map((m) => `${m.code} (verbs: ${m.recognizedVerbs.join(", ")}) - ${[m.markedNotSupportedByVerbs.length ? `marked ${m.markedNotSupportedByVerbs.join("/")} but no verb supports ${m.markedNotSupportedByVerbs.length > 1 ? "them" : "it"}` : "", m.verbSuggestsNotMarked.length ? `verb(s) suggest ${m.verbSuggestsNotMarked.join(", ")} but not marked` : ""].filter(Boolean).join("; ")}`).join(" | ") : "",
+  internalAlign.verbCategoryMismatches.length ? internalAlign.verbCategoryMismatches.map((m) => `${m.code} (verbs suggest: ${m.verbCategoryPairs.map((p) => `${p.verb}→${p.categories.join("/")}`).join(", ")}) - ${[m.markedNotSupportedByVerbs.length ? `marked ${m.markedNotSupportedByVerbs.join("/")} but no verb supports ${m.markedNotSupportedByVerbs.length > 1 ? "them" : "it"}` : "", m.verbSuggestsNotMarked.length ? `verb(s) suggest ${m.verbSuggestsNotMarked.join(", ")} but not marked` : ""].filter(Boolean).join("; ")}`).join(" | ") : "",
 ].filter(Boolean).join(" ") || "No internal inconsistencies detected."}
 
 TEMPLATE COMPLETENESS (checked against the district's required Unit Map template, ${completeness.passedChecks}/${completeness.totalChecks} sections complete): ${
@@ -183,13 +183,22 @@ TEMPLATE COMPLETENESS (checked against the district's required Unit Map template
             ))}
             {internalAlign.verbCategoryMismatches.map((m, i) => (
               <div key={i} style={{ marginBottom: 6 }}>
-                <span className="badge badge-partial">Off-verb</span> <strong>{m.code}</strong>&apos;s own verb{m.recognizedVerbs.length > 1 ? "s" : ""} ({m.recognizedVerbs.join(", ")}){" "}
+                <span className="badge badge-partial">Off-verb</span> <strong>{m.code}</strong>&apos;s own verb{m.recognizedVerbs.length > 1 ? "s" : ""} suggest{m.recognizedVerbs.length === 1 ? "s" : ""}{" "}
+                <strong>
+                  {m.verbCategoryPairs.map((p, pi) => (
+                    <span key={pi}>
+                      {p.verb} → {p.categories.join(" or ")}
+                      {pi < m.verbCategoryPairs.length - 1 ? ", " : ""}
+                    </span>
+                  ))}
+                </strong>
+                {" — "}
                 {m.markedNotSupportedByVerbs.length > 0 && (
-                  <>marks <strong>{m.markedNotSupportedByVerbs.join(", ")}</strong> without a verb to support {m.markedNotSupportedByVerbs.length > 1 ? "them" : "it"}</>
+                  <>the standard is marked <strong>{m.markedNotSupportedByVerbs.join(", ")}</strong>, which none of these verbs support</>
                 )}
                 {m.markedNotSupportedByVerbs.length > 0 && m.verbSuggestsNotMarked.length > 0 && "; "}
                 {m.verbSuggestsNotMarked.length > 0 && (
-                  <>suggest{m.recognizedVerbs.length === 1 ? "s" : ""} <strong>{m.verbSuggestsNotMarked.join(", ")}</strong> but that&apos;s not marked</>
+                  <>the verb{m.verbSuggestsNotMarked.length > 1 ? "s" : ""} above suggest{m.verbSuggestsNotMarked.length === 1 ? "s" : ""} <strong>{m.verbSuggestsNotMarked.join(", ")}</strong>, but that&apos;s not currently marked</>
                 )}
                 {" "}— see the <a href="/guide/learning-targets" style={{ color: "var(--teal)", textDecoration: "underline" }}>Learning Target Rubric</a> for how verbs map to categories.
               </div>

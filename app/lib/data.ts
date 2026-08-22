@@ -380,7 +380,7 @@ export function computeTemplateCompleteness(um: UnitMap | null): TemplateComplet
 export interface InternalAlignmentResult {
   priorityMissingFromCurriculumMap: string[];
   typeTargetMismatches: { code: string; categories: string[] }[];
-  verbCategoryMismatches: { code: string; recognizedVerbs: string[]; markedNotSupportedByVerbs: string[]; verbSuggestsNotMarked: string[] }[];
+  verbCategoryMismatches: { code: string; recognizedVerbs: string[]; verbCategoryPairs: { verb: string; categories: string[] }[]; markedNotSupportedByVerbs: string[]; verbSuggestsNotMarked: string[] }[];
 }
 
 const TARGET_CATEGORY_LABELS: { key: keyof NonNullable<UnitMap["priorityStandards"][number]["targets"]>; label: string }[] = [
@@ -476,7 +476,8 @@ export function computeInternalAlignment(um: UnitMap | null): InternalAlignmentR
     });
 
     if (markedNotSupportedByVerbs.length > 0 || verbSuggestsNotMarked.length > 0) {
-      verbCategoryMismatches.push({ code: ps.code, recognizedVerbs, markedNotSupportedByVerbs, verbSuggestsNotMarked });
+      const verbCategoryPairs = recognizedVerbs.map((v) => ({ verb: v, categories: VERB_TO_CATEGORIES[v] }));
+      verbCategoryMismatches.push({ code: ps.code, recognizedVerbs, verbCategoryPairs, markedNotSupportedByVerbs, verbSuggestsNotMarked });
     }
   });
 
