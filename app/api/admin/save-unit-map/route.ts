@@ -15,6 +15,16 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "school, grade, subject, unitName, and parsed are required" }, { status: 400 });
     }
 
+    // Ensure the subject exists in the subjects table - without this, pages
+    // that look up the subject by slug (the subject page, the unit detail
+    // page) 404 even though the unit itself is saved and shows up in the
+    // sidebar (which reads unit rows directly, not the subjects table).
+    // Preserves any existing strands list if the subject is already there.
+    await sql`
+      INSERT INTO subjects (name, strands) VALUES (${subject}, '[]')
+      ON CONFLICT (name) DO NOTHING
+    `;
+
     let unitId = providedUnitId as string | undefined;
 
     if (unitId) {
