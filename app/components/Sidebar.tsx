@@ -113,6 +113,20 @@ export default function Sidebar({ navTree }: { navTree: NavTree }) {
           </div>
         );
       })}
+
+      <div style={{ padding: "14px 20px 6px", marginTop: 10, borderTop: "1px solid rgba(255,255,255,0.15)", fontSize: 10, textTransform: "uppercase", letterSpacing: 0.6, color: "#8494A8" }}>
+        Admin
+      </div>
+      <Link
+        href="/admin/import"
+        style={{
+          display: "block", padding: "9px 20px", fontSize: 13, fontWeight: 600,
+          color: pathname.startsWith("/admin") ? "var(--gold)" : "#C7CEDA",
+          background: pathname.startsWith("/admin") ? "rgba(255,255,255,0.06)" : "transparent",
+        }}
+      >
+        Import Unit Map
+      </Link>
     </aside>
   );
 }

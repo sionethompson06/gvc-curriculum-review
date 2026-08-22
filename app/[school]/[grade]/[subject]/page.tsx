@@ -4,6 +4,10 @@ import Breadcrumb from "../../../components/Breadcrumb";
 import ProjectionGrid from "../../../components/ProjectionGrid";
 import { schoolFromSlug, subjectFromSlug, getMap, strandsFor, computeUnitAlignment, computeTemplateCompleteness, computeProjectionMapCompleteness } from "../../../lib/data";
 
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
+
 export default async function SubjectPage({ params }: { params: { school: string; grade: string; subject: string } }) {
   const school = schoolFromSlug(params.school);
   const subject = await subjectFromSlug(params.subject);

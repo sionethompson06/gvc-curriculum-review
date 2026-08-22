@@ -5,6 +5,10 @@ import NotesPanel from "../../../../components/NotesPanel";
 import { schoolFromSlug, subjectFromSlug, getMap, computeUnitAlignment, computeInternalAlignment, computeTemplateCompleteness, getReviewsForUnit, getNotesForUnit } from "../../../../lib/data";
 import type { CurriculumRow } from "../../../../lib/types";
 
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
+
 function findStandardDefinition(code: string, rows: CurriculumRow[]): string {
   const row = rows.find((r) => (r.standard || "").trim().toUpperCase().startsWith(code.toUpperCase()));
   if (!row) return "";

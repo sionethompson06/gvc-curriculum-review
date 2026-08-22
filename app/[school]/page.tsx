@@ -3,6 +3,10 @@ import { notFound } from "next/navigation";
 import Breadcrumb from "../components/Breadcrumb";
 import { schoolFromSlug, gradesWithDataForSchool, subjectsWithData, GRADES } from "../lib/data";
 
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
+
 export default async function SchoolPage({ params }: { params: { school: string } }) {
   const school = schoolFromSlug(params.school);
   if (!school) return notFound();
