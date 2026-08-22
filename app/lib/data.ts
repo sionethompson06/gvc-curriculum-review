@@ -380,6 +380,7 @@ export function computeTemplateCompleteness(um: UnitMap | null): TemplateComplet
 export interface InternalAlignmentResult {
   priorityMissingFromCurriculumMap: string[];
   typeTargetMismatches: { code: string; categories: string[] }[];
+  verbCategoryMismatches: { code: string; recognizedVerbs: string[]; markedNotSupportedByVerbs: string[]; verbSuggestsNotMarked: string[] }[];
 }
 
 const TARGET_CATEGORY_LABELS: { key: keyof NonNullable<UnitMap["priorityStandards"][number]["targets"]>; label: string }[] = [
@@ -389,8 +390,27 @@ const TARGET_CATEGORY_LABELS: { key: keyof NonNullable<UnitMap["priorityStandard
   { key: "product", label: "Product" },
 ];
 
+// Grounded in the district's Learning Target Rubric (see /guide/learning-targets).
+// Verbs not listed here (e.g. "understand", "discuss", "trace", "know") are
+// deliberately left unmapped - a standard whose only verbs fall outside this
+// list is treated as inconclusive rather than guessed at, to avoid false
+// positives. "explain" appears under both Knowledge and Reasoning per the
+// rubric's own note that context, not the word alone, decides its category.
+const VERB_TO_CATEGORIES: Record<string, string[]> = {
+  identify: ["Knowledge"], define: ["Knowledge"], list: ["Knowledge"], describe: ["Knowledge"], explain: ["Knowledge", "Reasoning"],
+  predict: ["Reasoning"], infer: ["Reasoning"], analyze: ["Reasoning"], evaluate: ["Reasoning"], compare: ["Reasoning"], contrast: ["Reasoning"], justify: ["Reasoning"], synthesize: ["Reasoning"],
+  observe: ["Performance Skill"], listen: ["Performance Skill"], perform: ["Performance Skill"], do: ["Performance Skill"], question: ["Performance Skill"], speak: ["Performance Skill"], assemble: ["Performance Skill"], operate: ["Performance Skill"], use: ["Performance Skill"], measure: ["Performance Skill"], model: ["Performance Skill"], demonstrate: ["Performance Skill"], solve: ["Performance Skill"], apply: ["Performance Skill"], execute: ["Performance Skill"], implement: ["Performance Skill"],
+  write: ["Product"], generate: ["Product"], design: ["Product"], combine: ["Product"], devise: ["Product"], modify: ["Product"], create: ["Product"], produce: ["Product"], construct: ["Product"], develop: ["Product"], formulate: ["Product"], propose: ["Product"],
+};
+
+function extractRecognizedVerbs(verbsText: string): string[] {
+  if (!verbsText) return [];
+  const lower = verbsText.toLowerCase();
+  return Object.keys(VERB_TO_CATEGORIES).filter((v) => new RegExp(`\\b${v}\\b`).test(lower));
+}
+
 export function computeInternalAlignment(um: UnitMap | null): InternalAlignmentResult {
-  if (!um) return { priorityMissingFromCurriculumMap: [], typeTargetMismatches: [] };
+  if (!um) return { priorityMissingFromCurriculumMap: [], typeTargetMismatches: [], verbCategoryMismatches: [] };
   const priorityStandards = um.priorityStandards || [];
 
   // Check 1: a standard chosen under CHOOSE PRIORITY STANDARD(S) never shows
@@ -425,7 +445,42 @@ export function computeInternalAlignment(um: UnitMap | null): InternalAlignmentR
     }
   });
 
-  return { priorityMissingFromCurriculumMap, typeTargetMismatches };
+  // Check 3: does the standard's own type marking "stay on verb", per the
+  // district's Learning Target Rubric? A standard whose only verbs fall
+  // outside the rubric's four verb lists is skipped entirely (inconclusive,
+  // not flagged) - this is a deliberate tradeoff to avoid false positives on
+  // very common unmapped verbs like "understand", at the cost of not
+  // catching real misalignments on those standards automatically.
+  const verbCategoryMismatches: InternalAlignmentResult["verbCategoryMismatches"] = [];
+  priorityStandards.forEach((ps) => {
+    if (!ps.type || !ps.verbs) return;
+    const recognizedVerbs = extractRecognizedVerbs(ps.verbs);
+    if (recognizedVerbs.length === 0) return; // inconclusive - no known verbs to check against
+
+    const suggestedCategories = new Set<string>();
+    recognizedVerbs.forEach((v) => VERB_TO_CATEGORIES[v].forEach((c) => suggestedCategories.add(c)));
+
+    const markedCategories = ps.type.split(",").map((c) => c.trim()).filter(Boolean);
+    const markedSet = new Set(markedCategories);
+
+    const markedNotSupportedByVerbs = markedCategories.filter((c) => !suggestedCategories.has(c));
+
+    const verbSuggestsNotMarked: string[] = [];
+    recognizedVerbs.forEach((v) => {
+      const cats = VERB_TO_CATEGORIES[v];
+      const anyMarked = cats.some((c) => markedSet.has(c));
+      if (!anyMarked) {
+        const label = cats.length > 1 ? `${v} (${cats.join(" or ")})` : v;
+        if (!verbSuggestsNotMarked.some((existing) => existing.startsWith(v))) verbSuggestsNotMarked.push(label);
+      }
+    });
+
+    if (markedNotSupportedByVerbs.length > 0 || verbSuggestsNotMarked.length > 0) {
+      verbCategoryMismatches.push({ code: ps.code, recognizedVerbs, markedNotSupportedByVerbs, verbSuggestsNotMarked });
+    }
+  });
+
+  return { priorityMissingFromCurriculumMap, typeTargetMismatches, verbCategoryMismatches };
 }
 
 // --- Projection Map completeness: checks whether the Projection Map itself
