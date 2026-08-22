@@ -55,6 +55,7 @@ export interface AssessmentBlock {
 
 export interface UnitMap {
   priorityStandards: PriorityStandardDeconstruction[];
+  otherDeconstructedStandards?: PriorityStandardDeconstruction[];
   supportingStandards?: SupportingStandard[];
   preAssessment: AssessmentBlock;
   postAssessment: AssessmentBlock;

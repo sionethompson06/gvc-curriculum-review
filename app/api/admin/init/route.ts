@@ -39,10 +39,10 @@ async function runInit() {
       }
       for (const [unitId, um] of Object.entries(mapData.unitMaps) as any) {
         await sql`
-          INSERT INTO unit_maps (unit_id, priority_standards, supporting_standards, pre_assessment, post_assessment, common_assessment, curriculum_rows, start_date, end_date)
-          VALUES (${unitId}, ${JSON.stringify(um.priorityStandards || [])}, ${JSON.stringify(um.supportingStandards || [])}, ${JSON.stringify(um.preAssessment || {})},
+          INSERT INTO unit_maps (unit_id, priority_standards, other_deconstructed_standards, supporting_standards, pre_assessment, post_assessment, common_assessment, curriculum_rows, start_date, end_date)
+          VALUES (${unitId}, ${JSON.stringify(um.priorityStandards || [])}, ${JSON.stringify(um.otherDeconstructedStandards || [])}, ${JSON.stringify(um.supportingStandards || [])}, ${JSON.stringify(um.preAssessment || {})},
                   ${JSON.stringify(um.postAssessment || {})}, ${JSON.stringify(um.commonAssessment || {})}, ${JSON.stringify(um.curriculumRows || [])}, ${um.startDate || ""}, ${um.endDate || ""})
-          ON CONFLICT (unit_id) DO UPDATE SET priority_standards=EXCLUDED.priority_standards, supporting_standards=EXCLUDED.supporting_standards, pre_assessment=EXCLUDED.pre_assessment,
+          ON CONFLICT (unit_id) DO UPDATE SET priority_standards=EXCLUDED.priority_standards, other_deconstructed_standards=EXCLUDED.other_deconstructed_standards, supporting_standards=EXCLUDED.supporting_standards, pre_assessment=EXCLUDED.pre_assessment,
             post_assessment=EXCLUDED.post_assessment, common_assessment=EXCLUDED.common_assessment, curriculum_rows=EXCLUDED.curriculum_rows, start_date=EXCLUDED.start_date, end_date=EXCLUDED.end_date
         `;
         unitMapsInserted++;

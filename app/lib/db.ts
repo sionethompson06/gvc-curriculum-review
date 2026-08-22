@@ -26,6 +26,7 @@ export async function ensureSchema() {
   )`;
   await sql`ALTER TABLE unit_maps ADD COLUMN IF NOT EXISTS supporting_standards JSONB NOT NULL DEFAULT '[]'`;
   await sql`ALTER TABLE unit_maps ADD COLUMN IF NOT EXISTS common_assessment JSONB NOT NULL DEFAULT '{}'`;
+  await sql`ALTER TABLE unit_maps ADD COLUMN IF NOT EXISTS other_deconstructed_standards JSONB NOT NULL DEFAULT '[]'`;
   await sql`CREATE TABLE IF NOT EXISTS subjects (
     name TEXT PRIMARY KEY,
     strands JSONB NOT NULL DEFAULT '[]'

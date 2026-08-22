@@ -50,10 +50,10 @@ export async function POST(req: NextRequest) {
     }
 
     await sql`
-      INSERT INTO unit_maps (unit_id, priority_standards, supporting_standards, pre_assessment, post_assessment, common_assessment, curriculum_rows, start_date, end_date)
-      VALUES (${unitId}, ${JSON.stringify(parsed.priorityStandards || [])}, ${JSON.stringify(parsed.supportingStandards || [])}, ${JSON.stringify(parsed.preAssessment || {})},
+      INSERT INTO unit_maps (unit_id, priority_standards, other_deconstructed_standards, supporting_standards, pre_assessment, post_assessment, common_assessment, curriculum_rows, start_date, end_date)
+      VALUES (${unitId}, ${JSON.stringify(parsed.priorityStandards || [])}, ${JSON.stringify(parsed.otherDeconstructedStandards || [])}, ${JSON.stringify(parsed.supportingStandards || [])}, ${JSON.stringify(parsed.preAssessment || {})},
               ${JSON.stringify(parsed.postAssessment || {})}, ${JSON.stringify(parsed.commonAssessment || {})}, ${JSON.stringify(parsed.curriculumRows || [])}, ${parsed.startDate || ""}, ${parsed.endDate || ""})
-      ON CONFLICT (unit_id) DO UPDATE SET priority_standards=EXCLUDED.priority_standards, supporting_standards=EXCLUDED.supporting_standards, pre_assessment=EXCLUDED.pre_assessment,
+      ON CONFLICT (unit_id) DO UPDATE SET priority_standards=EXCLUDED.priority_standards, other_deconstructed_standards=EXCLUDED.other_deconstructed_standards, supporting_standards=EXCLUDED.supporting_standards, pre_assessment=EXCLUDED.pre_assessment,
         post_assessment=EXCLUDED.post_assessment, common_assessment=EXCLUDED.common_assessment, curriculum_rows=EXCLUDED.curriculum_rows, start_date=EXCLUDED.start_date, end_date=EXCLUDED.end_date
     `;
 

@@ -201,6 +201,7 @@ export function parseUnitMapRawText(rawText: string): ParsedUnitMap {
     allStandardsCodes: [],
     chosenPriorityCodes: [],
     priorityStandards: [],
+    otherDeconstructedStandards: [],
     supportingStandards: [],
     preAssessment: {},
     postAssessment: {},
@@ -336,6 +337,39 @@ export function parseUnitMapRawText(rawText: string): ParsedUnitMap {
     });
   }
   result.priorityStandards = priorityStandards;
+
+  // Standards that were fully deconstructed (nouns, verbs, and/or targets
+  // written out) but never formally checked off under CHOOSE PRIORITY
+  // STANDARD(S) - e.g. a standard the teacher listed under Supporting
+  // Standards but still deconstructed anyway. Captured separately so this
+  // real work isn't lost, without blurring the "chosen priority" scope of
+  // priorityStandards itself. "type" is left blank since "Mark the standard
+  // type/s" is scoped to the chosen priority standards in the template
+  // itself - it's genuinely never marked for these.
+  const allDeconstructedCodes = new Set<string>([
+    ...Object.keys(nounsMap), ...Object.keys(verbsMap),
+    ...Object.keys(knowledgeMap), ...Object.keys(reasoningMap), ...Object.keys(perfMap), ...Object.keys(productMap),
+  ]);
+  const chosenSet = new Set(result.chosenPriorityCodes);
+  const otherDeconstructedStandards: PriorityStandardDeconstruction[] = [];
+  for (const code of allDeconstructedCodes) {
+    if (chosenSet.has(code)) continue;
+    const hasContent = !!(nounsMap[code] || verbsMap[code] || knowledgeMap[code] || reasoningMap[code] || perfMap[code] || productMap[code]);
+    if (!hasContent) continue;
+    otherDeconstructedStandards.push({
+      code,
+      type: "",
+      nouns: nounsMap[code] || "",
+      verbs: verbsMap[code] || "",
+      targets: {
+        knowledge: knowledgeMap[code] || "",
+        reasoning: reasoningMap[code] || "",
+        performanceSkill: perfMap[code] || "",
+        product: productMap[code] || "",
+      },
+    });
+  }
+  result.otherDeconstructedStandards = otherDeconstructedStandards;
 
   function parseAssessmentBlock(label: string): AssessmentBlock {
     const block: AssessmentBlock = {};

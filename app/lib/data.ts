@@ -68,6 +68,7 @@ function rowsToSubjectMap(rows: any[]): SubjectMap {
     if (row.priority_standards !== null && row.priority_standards !== undefined) {
       unitMaps[row.id] = {
         priorityStandards: row.priority_standards || [],
+        otherDeconstructedStandards: row.other_deconstructed_standards || [],
         supportingStandards: row.supporting_standards || [],
         preAssessment: row.pre_assessment || {},
         postAssessment: row.post_assessment || {},
@@ -83,7 +84,7 @@ function rowsToSubjectMap(rows: any[]): SubjectMap {
 
 const JOIN_QUERY = `
   SELECT u.id, u.school, u.grade, u.subject, u.name, u.days, u.dates, u.cells, u.sort_order,
-         um.priority_standards, um.supporting_standards, um.pre_assessment, um.post_assessment, um.common_assessment, um.curriculum_rows, um.start_date, um.end_date
+         um.priority_standards, um.other_deconstructed_standards, um.supporting_standards, um.pre_assessment, um.post_assessment, um.common_assessment, um.curriculum_rows, um.start_date, um.end_date
   FROM units u LEFT JOIN unit_maps um ON um.unit_id = u.id
 `;
 
@@ -106,6 +107,7 @@ export async function allMapEntries() {
     if (row.priority_standards !== null && row.priority_standards !== undefined) {
       grouped[key].map.unitMaps[row.id] = {
         priorityStandards: row.priority_standards || [],
+        otherDeconstructedStandards: row.other_deconstructed_standards || [],
         supportingStandards: row.supporting_standards || [],
         preAssessment: row.pre_assessment || {},
         postAssessment: row.post_assessment || {},
@@ -381,6 +383,7 @@ export interface InternalAlignmentResult {
   priorityMissingFromCurriculumMap: string[];
   typeTargetMismatches: { code: string; categories: string[] }[];
   verbCategoryMismatches: { code: string; recognizedVerbs: string[]; verbCategoryPairs: { verb: string; categories: string[] }[]; markedNotSupportedByVerbs: string[]; verbSuggestsNotMarked: string[] }[];
+  droppedTargets: { code: string; statements: { category: string; statement: string }[] }[];
 }
 
 const TARGET_CATEGORY_LABELS: { key: keyof NonNullable<UnitMap["priorityStandards"][number]["targets"]>; label: string }[] = [
@@ -410,7 +413,7 @@ function extractRecognizedVerbs(verbsText: string): string[] {
 }
 
 export function computeInternalAlignment(um: UnitMap | null): InternalAlignmentResult {
-  if (!um) return { priorityMissingFromCurriculumMap: [], typeTargetMismatches: [], verbCategoryMismatches: [] };
+  if (!um) return { priorityMissingFromCurriculumMap: [], typeTargetMismatches: [], verbCategoryMismatches: [], droppedTargets: [] };
   const priorityStandards = um.priorityStandards || [];
 
   // Check 1: a standard chosen under CHOOSE PRIORITY STANDARD(S) never shows
@@ -481,7 +484,34 @@ export function computeInternalAlignment(um: UnitMap | null): InternalAlignmentR
     }
   });
 
-  return { priorityMissingFromCurriculumMap, typeTargetMismatches, verbCategoryMismatches };
+  // Check 4: an individual "I can" statement was written during deconstruction
+  // but never carried into the curriculum map's teaching sequence (targetOrder)
+  // at all - distinct from Check 1, which only checks whether the standard as
+  // a whole made it into the curriculum map, not whether every target it was
+  // deconstructed into actually did. Runs across both chosen priority
+  // standards and any other standards that were still fully deconstructed
+  // without being formally marked priority.
+  const droppedTargets: InternalAlignmentResult["droppedTargets"] = [];
+  [...priorityStandards, ...(um.otherDeconstructedStandards || [])].forEach((ps) => {
+    if (!ps.targets) return;
+    const matchingRows = (um.curriculumRows || []).filter((r) => {
+      const rowCodes = normalizeCodes(r.standard || "");
+      return normalizeCodes(ps.code || "").some((c) => rowCodes.includes(c));
+    });
+    if (matchingRows.length === 0) return; // already flagged by Check 1
+    const curriculumStatements = new Set(
+      matchingRows.flatMap((r) => splitIntoStatements(r.targetOrder).map(normalizeStatement))
+    );
+    const missing: { category: string; statement: string }[] = [];
+    TARGET_CATEGORY_LABELS.forEach(({ key, label }) => {
+      splitIntoStatements(ps.targets?.[key]).forEach((stmt) => {
+        if (!curriculumStatements.has(normalizeStatement(stmt))) missing.push({ category: label, statement: stmt });
+      });
+    });
+    if (missing.length > 0) droppedTargets.push({ code: ps.code, statements: missing });
+  });
+
+  return { priorityMissingFromCurriculumMap, typeTargetMismatches, verbCategoryMismatches, droppedTargets };
 }
 
 // --- Projection Map completeness: checks whether the Projection Map itself
@@ -524,13 +554,6 @@ export function computeProjectionMapCompleteness(units: Unit[]): ProjectionCompl
 // either came from a different standard's targets, or was written directly
 // into the curriculum map without being deconstructed first - both worth
 // surfacing rather than silently leaving unlabeled. ---
-const TARGET_CATEGORY_FIELDS: { key: keyof LearningTargets; label: string }[] = [
-  { key: "knowledge", label: "Knowledge" },
-  { key: "reasoning", label: "Reasoning" },
-  { key: "performanceSkill", label: "Performance Skill" },
-  { key: "product", label: "Product" },
-];
-
 function normalizeStatement(s: string): string {
   return s.trim().replace(/\s+/g, " ").replace(/\.+$/, "").toLowerCase();
 }
@@ -543,14 +566,15 @@ export function splitIntoStatements(text?: string): string[] {
 export function matchTargetStatementToCategory(statement: string, ps: PriorityStandardDeconstruction | undefined): string | null {
   if (!ps || !ps.targets) return null;
   const normalizedStatement = normalizeStatement(statement);
-  for (const { key, label } of TARGET_CATEGORY_FIELDS) {
+  for (const { key, label } of TARGET_CATEGORY_LABELS) {
     const fragments = splitIntoStatements(ps.targets[key]).map(normalizeStatement);
     if (fragments.includes(normalizedStatement)) return label;
   }
   return null;
 }
 
-export function findMatchingPriorityStandard(rowStandardText: string, priorityStandards: PriorityStandardDeconstruction[]): PriorityStandardDeconstruction | undefined {
+export function findMatchingPriorityStandard(rowStandardText: string, priorityStandards: PriorityStandardDeconstruction[], otherDeconstructedStandards: PriorityStandardDeconstruction[] = []): PriorityStandardDeconstruction | undefined {
   const rowCodes = normalizeCodes(rowStandardText || "");
-  return priorityStandards.find((ps) => normalizeCodes(ps.code || "").some((c) => rowCodes.includes(c)));
+  const combined = [...priorityStandards, ...otherDeconstructedStandards];
+  return combined.find((ps) => normalizeCodes(ps.code || "").some((c) => rowCodes.includes(c)));
 }

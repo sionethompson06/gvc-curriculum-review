@@ -3,7 +3,7 @@ import Breadcrumb from "../../../../components/Breadcrumb";
 import ReviewPanel from "../../../../components/ReviewPanel";
 import NotesPanel from "../../../../components/NotesPanel";
 import { schoolFromSlug, subjectFromSlug, getMap, computeUnitAlignment, computeInternalAlignment, computeTemplateCompleteness, getReviewsForUnit, getNotesForUnit, matchTargetStatementToCategory, findMatchingPriorityStandard } from "../../../../lib/data";
-import type { CurriculumRow } from "../../../../lib/types";
+import type { CurriculumRow, PriorityStandardDeconstruction } from "../../../../lib/types";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -15,6 +15,49 @@ function findStandardDefinition(code: string, rows: CurriculumRow[]): string {
   const full = row.standard || "";
   const match = full.match(/^[\w.]+\s*[:\-–]\s*(.*)/s);
   return match ? match[1].trim() : full;
+}
+
+function DeconstructedStandardCard({ ps, curriculumRows }: { ps: PriorityStandardDeconstruction; curriculumRows: CurriculumRow[] }) {
+  const definition = findStandardDefinition(ps.code, curriculumRows);
+  return (
+    <div style={{ border: "1px solid var(--line)", padding: 12, marginBottom: 10, borderRadius: 3 }}>
+      <div style={{ marginBottom: 8, lineHeight: 1.5 }}>
+        <span style={{ fontWeight: 700 }}>{ps.code}</span>
+        {ps.type && <span className="badge badge-support" style={{ marginLeft: 6, marginRight: 6 }}>{ps.type}</span>}
+        {definition && <span style={{ fontSize: 13 }}> - {definition}</span>}
+      </div>
+      <div style={{ fontSize: 12, color: "var(--slate)", marginBottom: 3 }}>Nouns: {ps.nouns || "—"}</div>
+      <div style={{ fontSize: 12, color: "var(--slate)", marginBottom: 8 }}>Verbs: {ps.verbs || "—"}</div>
+      {ps.targets && (ps.targets.knowledge || ps.targets.reasoning || ps.targets.performanceSkill || ps.targets.product) && (
+        <div style={{ marginTop: 8 }}>
+          {ps.targets.knowledge && (
+            <div style={{ background: "var(--paper-dim)", padding: 8, borderRadius: 3, marginBottom: 6 }}>
+              <div style={{ fontSize: 9.5, fontWeight: 700, textTransform: "uppercase", color: "var(--slate)", marginBottom: 4 }}>Knowledge</div>
+              <div style={{ fontSize: 11.5 }}>{ps.targets.knowledge}</div>
+            </div>
+          )}
+          {ps.targets.reasoning && (
+            <div style={{ background: "var(--paper-dim)", padding: 8, borderRadius: 3, marginBottom: 6 }}>
+              <div style={{ fontSize: 9.5, fontWeight: 700, textTransform: "uppercase", color: "var(--slate)", marginBottom: 4 }}>Reasoning</div>
+              <div style={{ fontSize: 11.5 }}>{ps.targets.reasoning}</div>
+            </div>
+          )}
+          {ps.targets.performanceSkill && (
+            <div style={{ background: "var(--paper-dim)", padding: 8, borderRadius: 3, marginBottom: 6 }}>
+              <div style={{ fontSize: 9.5, fontWeight: 700, textTransform: "uppercase", color: "var(--slate)", marginBottom: 4 }}>Performance Skill</div>
+              <div style={{ fontSize: 11.5 }}>{ps.targets.performanceSkill}</div>
+            </div>
+          )}
+          {ps.targets.product && (
+            <div style={{ background: "var(--paper-dim)", padding: 8, borderRadius: 3 }}>
+              <div style={{ fontSize: 9.5, fontWeight: 700, textTransform: "uppercase", color: "var(--slate)", marginBottom: 4 }}>Product</div>
+              <div style={{ fontSize: 11.5 }}>{ps.targets.product}</div>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
 }
 
 interface VocabTerm {
@@ -131,6 +174,7 @@ INTERNAL UNIT MAP ALIGNMENT, within the Unit Map's own sections (already compute
   internalAlign.priorityMissingFromCurriculumMap.length ? `Chosen priority standard(s) never added to the Unit Curriculum Map: ${internalAlign.priorityMissingFromCurriculumMap.join(", ")}` : "",
   internalAlign.typeTargetMismatches.length ? internalAlign.typeTargetMismatches.map((m) => `${m.code} has ${m.categories.join("/")} target(s) written but type marking omits ${m.categories.length > 1 ? "them" : "it"}`).join("; ") : "",
   internalAlign.verbCategoryMismatches.length ? internalAlign.verbCategoryMismatches.map((m) => `${m.code} (verbs suggest: ${m.verbCategoryPairs.map((p) => `${p.verb}→${p.categories.join("/")}`).join(", ")}) - ${[m.markedNotSupportedByVerbs.length ? `marked ${m.markedNotSupportedByVerbs.join("/")} but no verb supports ${m.markedNotSupportedByVerbs.length > 1 ? "them" : "it"}` : "", m.verbSuggestsNotMarked.length ? `verb(s) suggest ${m.verbSuggestsNotMarked.join(", ")} but not marked` : ""].filter(Boolean).join("; ")}`).join(" | ") : "",
+  internalAlign.droppedTargets.length ? internalAlign.droppedTargets.map((d) => `${d.code} has ${d.statements.length} target(s) deconstructed but never carried into the Curriculum Map's teaching sequence: ${d.statements.map((s) => `[${s.category}] "${s.statement}"`).join("; ")}`).join(" | ") : "",
 ].filter(Boolean).join(" ") || "No internal inconsistencies detected."}
 
 TEMPLATE COMPLETENESS (checked against the district's required Unit Map template, ${completeness.passedChecks}/${completeness.totalChecks} sections complete): ${
@@ -174,7 +218,7 @@ TEMPLATE COMPLETENESS (checked against the district's required Unit Map template
         </div>
       )}
 
-      {(internalAlign.priorityMissingFromCurriculumMap.length > 0 || internalAlign.typeTargetMismatches.length > 0 || internalAlign.verbCategoryMismatches.length > 0) && (
+      {(internalAlign.priorityMissingFromCurriculumMap.length > 0 || internalAlign.typeTargetMismatches.length > 0 || internalAlign.verbCategoryMismatches.length > 0 || internalAlign.droppedTargets.length > 0) && (
         <div className="panel" style={{ borderColor: "var(--rust)" }}>
           <div className="panel-head" style={{ background: "var(--rust-soft)" }}><h3 style={{ color: "var(--rust)" }}>Internal Unit Map Alignment</h3></div>
           <div className="panel-body">
@@ -186,6 +230,18 @@ TEMPLATE COMPLETENESS (checked against the district's required Unit Map template
             {internalAlign.typeTargetMismatches.map((m, i) => (
               <div key={i} style={{ marginBottom: 6 }}>
                 <span className="badge badge-partial">Type/target mismatch</span> <strong>{m.code}</strong> has {m.categories.join(" and ")} target{m.categories.length > 1 ? "s" : ""} written out, but the standard's type marking doesn't include {m.categories.length > 1 ? "those categories" : "that category"} — worth confirming the type marking is complete.
+              </div>
+            ))}
+            {internalAlign.droppedTargets.map((d, i) => (
+              <div key={i} style={{ marginBottom: 6 }}>
+                <span className="badge badge-flag">Target dropped</span> <strong>{d.code}</strong> has {d.statements.length} target{d.statements.length > 1 ? "s" : ""} written during deconstruction that never made it into the Unit Curriculum Map's teaching sequence:
+                <ul style={{ margin: "4px 0 0", paddingLeft: 18 }}>
+                  {d.statements.map((s, si) => (
+                    <li key={si} style={{ marginBottom: 2 }}>
+                      <span className="badge badge-support" style={{ marginRight: 4 }}>{s.category}</span>{s.statement}
+                    </li>
+                  ))}
+                </ul>
               </div>
             ))}
             {internalAlign.verbCategoryMismatches.map((m, i) => (
@@ -254,50 +310,25 @@ TEMPLATE COMPLETENESS (checked against the district's required Unit Map template
             <div className="panel-head"><h3>Standard Deconstruction (Priority Standards Chosen by Teacher)</h3></div>
             <div className="panel-body">
               {(um.priorityStandards || []).length === 0 ? <div className="empty">Not deconstructed yet.</div> :
-                um.priorityStandards.map((ps, i) => {
-                  const definition = findStandardDefinition(ps.code, um.curriculumRows || []);
-                  return (
-                  <div key={i} style={{ border: "1px solid var(--line)", padding: 12, marginBottom: 10, borderRadius: 3 }}>
-                    <div style={{ marginBottom: 8, lineHeight: 1.5 }}>
-                      <span style={{ fontWeight: 700 }}>{ps.code}</span>
-                      {ps.type && <span className="badge badge-support" style={{ marginLeft: 6, marginRight: 6 }}>{ps.type}</span>}
-                      {definition && <span style={{ fontSize: 13 }}> - {definition}</span>}
-                    </div>
-                    <div style={{ fontSize: 12, color: "var(--slate)", marginBottom: 3 }}>Nouns: {ps.nouns || "—"}</div>
-                    <div style={{ fontSize: 12, color: "var(--slate)", marginBottom: 8 }}>Verbs: {ps.verbs || "—"}</div>
-                    {ps.targets && (ps.targets.knowledge || ps.targets.reasoning || ps.targets.performanceSkill || ps.targets.product) && (
-                      <div style={{ marginTop: 8 }}>
-                        {ps.targets.knowledge && (
-                          <div style={{ background: "var(--paper-dim)", padding: 8, borderRadius: 3, marginBottom: 6 }}>
-                            <div style={{ fontSize: 9.5, fontWeight: 700, textTransform: "uppercase", color: "var(--slate)", marginBottom: 4 }}>Knowledge</div>
-                            <div style={{ fontSize: 11.5 }}>{ps.targets.knowledge}</div>
-                          </div>
-                        )}
-                        {ps.targets.reasoning && (
-                          <div style={{ background: "var(--paper-dim)", padding: 8, borderRadius: 3, marginBottom: 6 }}>
-                            <div style={{ fontSize: 9.5, fontWeight: 700, textTransform: "uppercase", color: "var(--slate)", marginBottom: 4 }}>Reasoning</div>
-                            <div style={{ fontSize: 11.5 }}>{ps.targets.reasoning}</div>
-                          </div>
-                        )}
-                        {ps.targets.performanceSkill && (
-                          <div style={{ background: "var(--paper-dim)", padding: 8, borderRadius: 3, marginBottom: 6 }}>
-                            <div style={{ fontSize: 9.5, fontWeight: 700, textTransform: "uppercase", color: "var(--slate)", marginBottom: 4 }}>Performance Skill</div>
-                            <div style={{ fontSize: 11.5 }}>{ps.targets.performanceSkill}</div>
-                          </div>
-                        )}
-                        {ps.targets.product && (
-                          <div style={{ background: "var(--paper-dim)", padding: 8, borderRadius: 3 }}>
-                            <div style={{ fontSize: 9.5, fontWeight: 700, textTransform: "uppercase", color: "var(--slate)", marginBottom: 4 }}>Product</div>
-                            <div style={{ fontSize: 11.5 }}>{ps.targets.product}</div>
-                          </div>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                  );
-                })}
+                um.priorityStandards.map((ps, i) => (
+                  <DeconstructedStandardCard key={i} ps={ps} curriculumRows={um.curriculumRows || []} />
+                ))}
             </div>
           </div>
+
+          {(um.otherDeconstructedStandards || []).length > 0 && (
+            <div className="panel">
+              <div className="panel-head"><h3>Additional Standards Deconstructed (Not Marked Priority)</h3></div>
+              <div className="panel-body">
+                <div className="note-strip">
+                  These standards weren&apos;t formally chosen under CHOOSE PRIORITY STANDARD(S), but the teacher still fully deconstructed them - nouns, verbs, and learning targets are all here.
+                </div>
+                {um.otherDeconstructedStandards!.map((ps, i) => (
+                  <DeconstructedStandardCard key={i} ps={ps} curriculumRows={um.curriculumRows || []} />
+                ))}
+              </div>
+            </div>
+          )}
 
           <div className="panel">
             <div className="panel-head">
@@ -327,7 +358,7 @@ TEMPLATE COMPLETENESS (checked against the district's required Unit Map template
                     {um.curriculumRows.map((r, i) => {
                       const vocabTerms = parseVocabTerms(r.contentVocab);
                       const targetList = splitLearningTargets(r.targetOrder);
-                      const matchedPs = findMatchingPriorityStandard(r.standard, um.priorityStandards || []);
+                      const matchedPs = findMatchingPriorityStandard(r.standard, um.priorityStandards || [], um.otherDeconstructedStandards || []);
                       return (
                       <tr key={i}>
                         <td style={{ fontWeight: 600, fontSize: 12, verticalAlign: "top" }}>{r.standard}</td>
