@@ -21,6 +21,15 @@ interface ChunkState {
   saveError: string;
 }
 
+// Unit Map document titles often carry extra context the Projection Map's
+// own unit name doesn't have (e.g. "Unit 1 History (Grade 6)" vs. just
+// "Unit 1") - matching on the unit's number is far more reliable than an
+// exact string match across those two naming conventions.
+function extractUnitNumber(name: string): number | null {
+  const m = name.match(/Unit\s+(\d+)/i);
+  return m ? parseInt(m[1], 10) : null;
+}
+
 export default function AdminImportPage() {
   const [school, setSchool] = useState(SCHOOLS[1]);
   const [grade, setGrade] = useState("6");
@@ -58,11 +67,20 @@ export default function AdminImportPage() {
       if (res.ok) {
         const data = await res.json();
         setExistingUnits(data.units || []);
-        // Auto-suggest a link if a unit with a matching name already exists
+        // Auto-suggest a link: prefer matching by unit number (robust across
+        // naming conventions), falling back to an exact name match for
+        // documents that don't follow the "Unit N" pattern at all.
         setChunks((prev) =>
           (prev || []).map((c) => {
-            const match = (data.units || []).find((u: ExistingUnit) => u.name.toLowerCase() === c.newUnitName.toLowerCase());
-            return match ? { ...c, linkMode: "existing", selectedUnitId: match.id } : c;
+            const chunkNum = extractUnitNumber(c.title);
+            let match: ExistingUnit | undefined;
+            if (chunkNum !== null) {
+              match = (data.units || []).find((u: ExistingUnit) => extractUnitNumber(u.name) === chunkNum);
+            }
+            if (!match) {
+              match = (data.units || []).find((u: ExistingUnit) => u.name.toLowerCase() === c.newUnitName.toLowerCase());
+            }
+            return match ? { ...c, linkMode: "existing" as const, selectedUnitId: match.id } : c;
           })
         );
       }
