@@ -135,11 +135,21 @@ export default function Sidebar({ navTree }: { navTree: NavTree }) {
         href="/admin/import"
         style={{
           display: "block", padding: "9px 20px", fontSize: 13, fontWeight: 600,
-          color: pathname.startsWith("/admin") ? "var(--gold)" : "#C7CEDA",
-          background: pathname.startsWith("/admin") ? "rgba(255,255,255,0.06)" : "transparent",
+          color: pathname === "/admin/import" ? "var(--gold)" : "#C7CEDA",
+          background: pathname === "/admin/import" ? "rgba(255,255,255,0.06)" : "transparent",
         }}
       >
         Import Unit Map
+      </Link>
+      <Link
+        href="/admin/import-projection"
+        style={{
+          display: "block", padding: "9px 20px", fontSize: 13, fontWeight: 600,
+          color: pathname === "/admin/import-projection" ? "var(--gold)" : "#C7CEDA",
+          background: pathname === "/admin/import-projection" ? "rgba(255,255,255,0.06)" : "transparent",
+        }}
+      >
+        Import Projection Map
       </Link>
     </aside>
   );

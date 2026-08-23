@@ -15,7 +15,7 @@ export interface ParsedUnitMap extends UnitMap {
   chosenPriorityCodes: string[];
 }
 
-function cleanMarkdownLinks(text: string): string {
+export function cleanMarkdownLinks(text: string): string {
   return text.replace(/\[([^\]]+)\]\([^)]+\)/g, "$1");
 }
 
@@ -23,7 +23,7 @@ function cleanMarkdownLinks(text: string): string {
 // that were on separate lines in the source doc (e.g. "compared.I can" or
 // "quantities(verbs)" or "sort6.1.1"). Insert a space in these specific safe
 // cases; never applied to standard-code strings themselves (see cleanAllStrings).
-function unescapeMarkdown(text: string): string {
+export function unescapeMarkdown(text: string): string {
   return text.replace(/\\([*!\[\]()_~`>#+.-])/g, "$1");
 }
 
