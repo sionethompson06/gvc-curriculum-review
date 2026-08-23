@@ -46,10 +46,13 @@ export default function AdminImportPage() {
   const [chunks, setChunks] = useState<ChunkState[] | null>(null);
   const [existingUnits, setExistingUnits] = useState<ExistingUnit[]>([]);
   const [parseError, setParseError] = useState("");
+  const [lookupNotice, setLookupNotice] = useState("");
 
   async function handleParse() {
     setParseError("");
-    if (!subject.trim()) {
+    setLookupNotice("");
+    const trimmedSubject = subject.trim();
+    if (!trimmedSubject) {
       setParseError("Enter a subject name first.");
       return;
     }
@@ -73,27 +76,32 @@ export default function AdminImportPage() {
       }));
       setChunks(parsedChunks);
 
-      const res = await fetch(`/api/admin/units-for-subject?school=${encodeURIComponent(school)}&grade=${encodeURIComponent(grade)}&subject=${encodeURIComponent(subject)}`);
-      if (res.ok) {
-        const data = await res.json();
-        setExistingUnits(data.units || []);
-        // Auto-suggest a link: prefer matching by unit number (robust across
-        // naming conventions), falling back to an exact name match for
-        // documents that don't follow the "Unit N" pattern at all.
-        setChunks((prev) =>
-          (prev || []).map((c) => {
-            const chunkNum = extractUnitNumber(c.title);
-            let match: ExistingUnit | undefined;
-            if (chunkNum !== null) {
-              match = (data.units || []).find((u: ExistingUnit) => extractUnitNumber(u.name) === chunkNum);
-            }
-            if (!match) {
-              match = (data.units || []).find((u: ExistingUnit) => u.name.toLowerCase() === c.newUnitName.toLowerCase());
-            }
-            return match ? { ...c, linkMode: "existing" as const, selectedUnitId: match.id } : c;
-          })
-        );
+      const res = await fetch(`/api/admin/units-for-subject?school=${encodeURIComponent(school)}&grade=${encodeURIComponent(grade)}&subject=${encodeURIComponent(trimmedSubject)}`);
+      const data = await res.json();
+      if (!res.ok) {
+        setLookupNotice(`Couldn't look up existing units: ${data.error || `HTTP ${res.status}`}. You can still "Create new unit" below, or fix this and click Parse again.`);
+        return;
       }
+      setExistingUnits(data.units || []);
+      if ((data.units || []).length === 0) {
+        setLookupNotice(`No existing units found for ${school} / Grade ${grade} / ${trimmedSubject}. If units should already exist, double-check the subject name matches exactly (e.g. via a Projection Map import) - otherwise use "Create new unit" below.`);
+      }
+      // Auto-suggest a link: prefer matching by unit number (robust across
+      // naming conventions), falling back to an exact name match for
+      // documents that don't follow the "Unit N" pattern at all.
+      setChunks((prev) =>
+        (prev || []).map((c) => {
+          const chunkNum = extractUnitNumber(c.title);
+          let match: ExistingUnit | undefined;
+          if (chunkNum !== null) {
+            match = (data.units || []).find((u: ExistingUnit) => extractUnitNumber(u.name) === chunkNum);
+          }
+          if (!match) {
+            match = (data.units || []).find((u: ExistingUnit) => u.name.toLowerCase() === c.newUnitName.toLowerCase());
+          }
+          return match ? { ...c, linkMode: "existing" as const, selectedUnitId: match.id } : c;
+        })
+      );
     } catch (e: any) {
       setParseError(`Parse error: ${e.message || e}`);
     }
@@ -181,6 +189,7 @@ export default function AdminImportPage() {
             <button onClick={handleParse}>Parse</button>
           </div>
           {parseError && <div style={{ color: "var(--rust)", fontSize: 12.5, marginTop: 8 }}>{parseError}</div>}
+          {lookupNotice && <div className="note-strip" style={{ marginTop: 8 }}>{lookupNotice}</div>}
         </div>
       </div>
 
