@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { sql } from "@vercel/postgres";
 import { ensureSchema } from "../../../lib/db";
+import { summarizeIssues, diffIssues } from "../../../lib/data";
+import type { Unit, UnitMap } from "../../../lib/types";
 
 function slugify(name: string): string {
   return name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
@@ -26,13 +28,37 @@ export async function POST(req: NextRequest) {
     `;
 
     let unitId = providedUnitId as string | undefined;
+    let unitRow: any = null;
+    let previousUnitMapRow: any = null;
 
     if (unitId) {
       // Linking to an existing unit row (created by a prior Projection Map
-      // import) - confirm it actually exists and belongs to this subject.
-      const { rows } = await sql`SELECT id FROM units WHERE id = ${unitId} AND school = ${school} AND grade = ${grade} AND subject = ${subject}`;
+      // import) - confirm it actually exists and belongs to this subject,
+      // and capture its current state (including any existing Unit Map)
+      // before it gets overwritten, so we can diff before vs. after.
+      const { rows } = await sql`
+        SELECT u.id, u.name, u.days, u.dates, u.cells,
+               um.priority_standards, um.other_deconstructed_standards, um.supporting_standards,
+               um.pre_assessment, um.post_assessment, um.common_assessment, um.curriculum_rows, um.start_date, um.end_date
+        FROM units u LEFT JOIN unit_maps um ON um.unit_id = u.id
+        WHERE u.id = ${unitId} AND u.school = ${school} AND u.grade = ${grade} AND u.subject = ${subject}
+      `;
       if (rows.length === 0) {
         return NextResponse.json({ error: `Unit id ${unitId} not found for ${school}/${grade}/${subject}` }, { status: 404 });
+      }
+      unitRow = rows[0];
+      if (unitRow.priority_standards !== null && unitRow.priority_standards !== undefined) {
+        previousUnitMapRow = {
+          priorityStandards: unitRow.priority_standards || [],
+          otherDeconstructedStandards: unitRow.other_deconstructed_standards || [],
+          supportingStandards: unitRow.supporting_standards || [],
+          preAssessment: unitRow.pre_assessment || {},
+          postAssessment: unitRow.post_assessment || {},
+          commonAssessment: unitRow.common_assessment || {},
+          curriculumRows: unitRow.curriculum_rows || [],
+          startDate: unitRow.start_date || "",
+          endDate: unitRow.end_date || "",
+        };
       }
     } else {
       // No existing unit to link to - create a new placeholder unit row.
@@ -47,7 +73,11 @@ export async function POST(req: NextRequest) {
         INSERT INTO units (id, school, grade, subject, name, days, dates, cells, sort_order)
         VALUES (${unitId}, ${school}, ${grade}, ${subject}, ${unitName}, '', '', '{}', ${nextOrder})
       `;
+      unitRow = { id: unitId, name: unitName, days: "", dates: "", cells: {} };
     }
+
+    const unitForChecks: Unit = { id: unitRow.id, name: unitRow.name || "", days: unitRow.days || "", dates: unitRow.dates || "", cells: unitRow.cells || {} };
+    const beforeIssues = summarizeIssues(unitForChecks, previousUnitMapRow);
 
     await sql`
       INSERT INTO unit_maps (unit_id, priority_standards, other_deconstructed_standards, supporting_standards, pre_assessment, post_assessment, common_assessment, curriculum_rows, start_date, end_date)
@@ -57,7 +87,21 @@ export async function POST(req: NextRequest) {
         post_assessment=EXCLUDED.post_assessment, common_assessment=EXCLUDED.common_assessment, curriculum_rows=EXCLUDED.curriculum_rows, start_date=EXCLUDED.start_date, end_date=EXCLUDED.end_date
     `;
 
-    return NextResponse.json({ ok: true, unitId });
+    const afterUnitMap: UnitMap = {
+      priorityStandards: parsed.priorityStandards || [],
+      otherDeconstructedStandards: parsed.otherDeconstructedStandards || [],
+      supportingStandards: parsed.supportingStandards || [],
+      preAssessment: parsed.preAssessment || {},
+      postAssessment: parsed.postAssessment || {},
+      commonAssessment: parsed.commonAssessment || {},
+      curriculumRows: parsed.curriculumRows || [],
+      startDate: parsed.startDate || "",
+      endDate: parsed.endDate || "",
+    };
+    const afterIssues = summarizeIssues(unitForChecks, afterUnitMap);
+    const diff = diffIssues(beforeIssues, afterIssues);
+
+    return NextResponse.json({ ok: true, unitId, isReimport: !!previousUnitMapRow, diff });
   } catch (err: any) {
     return NextResponse.json({ error: err.message || "Request failed" }, { status: 500 });
   }

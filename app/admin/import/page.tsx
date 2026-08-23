@@ -10,6 +10,12 @@ interface ExistingUnit {
   has_unit_map: boolean;
 }
 
+interface IssueDiff {
+  resolved: string[];
+  newlyIntroduced: string[];
+  stillPresent: string[];
+}
+
 interface ChunkState {
   title: string;
   rawText: string;
@@ -19,6 +25,8 @@ interface ChunkState {
   newUnitName: string;
   saveStatus: "idle" | "saving" | "saved" | "error";
   saveError: string;
+  diff: IssueDiff | null;
+  isReimport: boolean;
 }
 
 // Unit Map document titles often carry extra context the Projection Map's
@@ -60,6 +68,8 @@ export default function AdminImportPage() {
         newUnitName: c.title.replace(/\s*\(Grade\s*\d+\)\s*$/i, "").trim() || c.title,
         saveStatus: "idle",
         saveError: "",
+        diff: null,
+        isReimport: false,
       }));
       setChunks(parsedChunks);
 
@@ -119,7 +129,7 @@ export default function AdminImportPage() {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Save failed");
-      updateChunk(i, { saveStatus: "saved" });
+      updateChunk(i, { saveStatus: "saved", diff: data.diff || null, isReimport: !!data.isReimport });
     } catch (e: any) {
       updateChunk(i, { saveStatus: "error", saveError: e.message || String(e) });
     }
@@ -233,6 +243,41 @@ export default function AdminImportPage() {
                     <input type="text" value={c.newUnitName} onChange={(e) => updateChunk(i, { newUnitName: e.target.value })} placeholder="Unit name" />
                   )}
                 </div>
+
+                {c.saveStatus === "saved" && c.diff && c.isReimport && (
+                  <div style={{ background: "var(--paper-dim)", padding: 12, borderRadius: 3, marginBottom: 12 }}>
+                    <div style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.4, color: "var(--slate)", marginBottom: 8 }}>
+                      What changed from the previous version
+                    </div>
+                    {c.diff.resolved.length === 0 && c.diff.newlyIntroduced.length === 0 ? (
+                      <div style={{ fontSize: 12.5, color: "var(--slate)" }}>No difference in flagged issues from the previous version.</div>
+                    ) : (
+                      <>
+                        {c.diff.resolved.length > 0 && (
+                          <div style={{ marginBottom: c.diff.newlyIntroduced.length > 0 ? 10 : 0 }}>
+                            <div style={{ fontSize: 11.5, fontWeight: 700, color: "var(--teal)", marginBottom: 4 }}>✓ Resolved ({c.diff.resolved.length})</div>
+                            <ul style={{ margin: 0, paddingLeft: 18 }}>
+                              {c.diff.resolved.map((issue, ii) => <li key={ii} style={{ fontSize: 12, marginBottom: 2 }}>{issue}</li>)}
+                            </ul>
+                          </div>
+                        )}
+                        {c.diff.newlyIntroduced.length > 0 && (
+                          <div>
+                            <div style={{ fontSize: 11.5, fontWeight: 700, color: "var(--rust)", marginBottom: 4 }}>New ({c.diff.newlyIntroduced.length})</div>
+                            <ul style={{ margin: 0, paddingLeft: 18 }}>
+                              {c.diff.newlyIntroduced.map((issue, ii) => <li key={ii} style={{ fontSize: 12, marginBottom: 2 }}>{issue}</li>)}
+                            </ul>
+                          </div>
+                        )}
+                      </>
+                    )}
+                    {c.diff.stillPresent.length > 0 && (
+                      <div style={{ marginTop: 10, fontSize: 12, color: "var(--slate)" }}>
+                        {c.diff.stillPresent.length} issue{c.diff.stillPresent.length > 1 ? "s" : ""} still present from before.
+                      </div>
+                    )}
+                  </div>
+                )}
 
                 {c.saveStatus === "error" && (
                   <div style={{ color: "var(--rust)", fontSize: 12.5, marginBottom: 8 }}>{c.saveError}</div>

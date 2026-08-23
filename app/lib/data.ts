@@ -578,3 +578,46 @@ export function findMatchingPriorityStandard(rowStandardText: string, prioritySt
   const combined = [...priorityStandards, ...otherDeconstructedStandards];
   return combined.find((ps) => normalizeCodes(ps.code || "").some((c) => rowCodes.includes(c)));
 }
+
+// --- Flattens every check (completeness, external alignment, internal
+// alignment) into a single list of human-readable issue strings, so two
+// points in time can be compared with plain set difference - used to show
+// "what's resolved / what's new" when a Unit Map is re-imported over an
+// existing one. Deliberately re-derived fresh each call rather than stored,
+// since it's cheap to compute and always reflects the exact wording shown
+// elsewhere in the app. ---
+export function summarizeIssues(unit: Unit, um: UnitMap | null): string[] {
+  const issues: string[] = [];
+
+  const completeness = computeTemplateCompleteness(um);
+  completeness.missingItems.forEach((i) => issues.push(`Completeness: ${i}`));
+
+  const align = computeUnitAlignment(unit, um);
+  if (align.missingFromUnitMap.length) issues.push(`Alignment: Projection Map promises ${align.missingFromUnitMap.join(", ")} but Unit Map never addresses it`);
+  if (align.extraInUnitMap.length) issues.push(`Alignment: Unit Map covers ${align.extraInUnitMap.join(", ")}, not on the Projection Map`);
+  if (align.dateIssue?.kind === "mismatch") issues.push(`Alignment: Timeline mismatch (Projection ${align.dateIssue.projStart}-${align.dateIssue.projEnd} vs Unit Map ${align.dateIssue.umStart}-${align.dateIssue.umEnd})`);
+  if (align.dateIssue?.kind === "missingProjectionDates") issues.push(`Alignment: Projection Map has no dates on file for this unit`);
+  if (align.dateIssue?.kind === "missingUnitMapDates") issues.push(`Alignment: Unit Map has no Plan Start/End Date`);
+
+  const internal = computeInternalAlignment(um);
+  if (internal.priorityMissingFromCurriculumMap.length) issues.push(`Internal alignment: ${internal.priorityMissingFromCurriculumMap.join(", ")} not carried into the Curriculum Map`);
+  internal.typeTargetMismatches.forEach((m) => issues.push(`Internal alignment: ${m.code} has ${m.categories.join("/")} target(s) but type marking omits ${m.categories.length > 1 ? "them" : "it"}`));
+  internal.verbCategoryMismatches.forEach((m) => issues.push(`Internal alignment: ${m.code} off-verb (marked ${m.markedNotSupportedByVerbs.join("/") || "-"}, verb suggests ${m.verbSuggestsNotMarked.join("/") || "-"})`));
+  internal.droppedTargets.forEach((d) => issues.push(`Internal alignment: ${d.code} has ${d.statements.length} target(s) dropped from the Curriculum Map`));
+
+  return issues;
+}
+
+export interface IssueDiff {
+  resolved: string[];
+  newlyIntroduced: string[];
+  stillPresent: string[];
+}
+
+export function diffIssues(before: string[], after: string[]): IssueDiff {
+  return {
+    resolved: before.filter((i) => !after.includes(i)),
+    newlyIntroduced: after.filter((i) => !before.includes(i)),
+    stillPresent: before.filter((i) => after.includes(i)),
+  };
+}
