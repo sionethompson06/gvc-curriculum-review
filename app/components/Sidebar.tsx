@@ -151,6 +151,16 @@ export default function Sidebar({ navTree }: { navTree: NavTree }) {
       >
         Import Projection Map
       </Link>
+      <Link
+        href="/admin/import-assessment"
+        style={{
+          display: "block", padding: "9px 20px", fontSize: 13, fontWeight: 600,
+          color: pathname === "/admin/import-assessment" ? "var(--gold)" : "#C7CEDA",
+          background: pathname === "/admin/import-assessment" ? "rgba(255,255,255,0.06)" : "transparent",
+        }}
+      >
+        Import Assessment
+      </Link>
     </aside>
   );
 }

@@ -2,7 +2,7 @@ import { notFound } from "next/navigation";
 import Breadcrumb from "../../../../components/Breadcrumb";
 import ReviewPanel from "../../../../components/ReviewPanel";
 import NotesPanel from "../../../../components/NotesPanel";
-import { schoolFromSlug, subjectFromSlug, getMap, computeUnitAlignment, computeInternalAlignment, computeTemplateCompleteness, getReviewsForUnit, getNotesForUnit, matchTargetStatementToCategory, findMatchingPriorityStandard } from "../../../../lib/data";
+import { schoolFromSlug, subjectFromSlug, getMap, computeUnitAlignment, computeInternalAlignment, computeTemplateCompleteness, computeAssessmentCompleteness, computeAssessmentAlignment, getReviewsForUnit, getNotesForUnit, matchTargetStatementToCategory, findMatchingPriorityStandard } from "../../../../lib/data";
 import type { CurriculumRow, PriorityStandardDeconstruction } from "../../../../lib/types";
 
 export const dynamic = "force-dynamic";
@@ -133,6 +133,13 @@ export default async function UnitPage({ params }: { params: { school: string; g
   const align = computeUnitAlignment(unit, um);
   const internalAlign = computeInternalAlignment(um);
   const completeness = computeTemplateCompleteness(um);
+  const allAssessmentQuestions = [
+    ...(um?.preAssessment?.questions || []),
+    ...(um?.postAssessment?.questions || []),
+    ...(um?.commonAssessment?.questions || []),
+  ];
+  const assessmentCompleteness = computeAssessmentCompleteness(um?.priorityStandards || [], allAssessmentQuestions);
+  const assessmentAlignment = computeAssessmentAlignment(um?.priorityStandards || [], um?.otherDeconstructedStandards || [], allAssessmentQuestions);
 
   let pastReviews: Awaited<ReturnType<typeof getReviewsForUnit>> = [];
   let notes: Awaited<ReturnType<typeof getNotesForUnit>> = [];
@@ -433,6 +440,47 @@ TEMPLATE COMPLETENESS (checked against the district's required Unit Map template
                 )}
               </div>
             </div>
+          )}
+
+          {allAssessmentQuestions.length > 0 && (
+            <>
+              <div className="panel" style={{ borderColor: assessmentCompleteness.missingItems.length > 0 ? "var(--amber)" : "var(--teal)" }}>
+                <div className="panel-head" style={{ background: assessmentCompleteness.missingItems.length > 0 ? "var(--amber-soft)" : "var(--teal-soft)" }}>
+                  <h3 style={{ color: assessmentCompleteness.missingItems.length > 0 ? "var(--amber)" : "var(--teal)" }}>
+                    Assessment Completeness — {assessmentCompleteness.passedChecks}/{assessmentCompleteness.totalChecks}
+                  </h3>
+                </div>
+                <div className="panel-body">
+                  {assessmentCompleteness.missingItems.length === 0 ? (
+                    <div style={{ fontSize: 12.5, color: "var(--teal)" }}>Every marked target is assessed by at least one tagged question, and every question is tagged.</div>
+                  ) : (
+                    <ul style={{ margin: 0, paddingLeft: 18 }}>
+                      {assessmentCompleteness.missingItems.map((item, i) => (
+                        <li key={i} style={{ fontSize: 12.5, marginBottom: 4 }}>{item}</li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              </div>
+
+              {(assessmentAlignment.invalidStandardTags.length > 0 || assessmentAlignment.invalidCategoryTags.length > 0) && (
+                <div className="panel" style={{ borderColor: "var(--rust)" }}>
+                  <div className="panel-head" style={{ background: "var(--rust-soft)" }}><h3 style={{ color: "var(--rust)" }}>Assessment Alignment</h3></div>
+                  <div className="panel-body">
+                    {assessmentAlignment.invalidStandardTags.map((t, i) => (
+                      <div key={i} style={{ marginBottom: 6 }}>
+                        <span className="badge badge-flag">Unknown standard</span> Q{t.questionNumber} is tagged <strong>{t.standardCode}</strong>, which isn&apos;t a priority (or otherwise deconstructed) standard in this unit — check for a typo or wrong code.
+                      </div>
+                    ))}
+                    {assessmentAlignment.invalidCategoryTags.map((t, i) => (
+                      <div key={i} style={{ marginBottom: 6 }}>
+                        <span className="badge badge-partial">Untested category</span> Q{t.questionNumber} is tagged <strong>{t.standardCode}-{t.category}</strong>, but {t.category} was never marked as a target category for {t.standardCode} during deconstruction — worth confirming this question actually belongs here.
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </>
           )}
         </>
       )}

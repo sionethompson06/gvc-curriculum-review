@@ -1,5 +1,5 @@
 import { sql } from "@vercel/postgres";
-import type { SubjectMap, Unit, UnitMap, PriorityStandardDeconstruction, LearningTargets } from "./types";
+import type { SubjectMap, Unit, UnitMap, PriorityStandardDeconstruction, LearningTargets, AssessmentQuestion } from "./types";
 
 export const SCHOOLS = ["TEACH Prep", "TEACH Academy", "TEACH Tech"];
 export const GRADES = ["K", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12"];
@@ -620,4 +620,83 @@ export function diffIssues(before: string[], after: string[]): IssueDiff {
     newlyIntroduced: after.filter((i) => !before.includes(i)),
     stillPresent: before.filter((i) => after.includes(i)),
   };
+}
+
+// --- Assessment completion and alignment checks. Mirrors the same
+// completion/alignment/quality framework used everywhere else: completion
+// checks whether every marked target actually gets assessed by something;
+// alignment checks whether each question's tag is even valid against what
+// was actually deconstructed for that standard - both purely deterministic,
+// no AI judgment needed. Whether a tagged question genuinely tests what it
+// claims to (the "quality" piece) requires reading the actual question
+// against the target's language and is intentionally not attempted here. ---
+export interface AssessmentCompletenessResult {
+  missingItems: string[];
+  totalChecks: number;
+  passedChecks: number;
+}
+
+export function computeAssessmentCompleteness(
+  priorityStandards: PriorityStandardDeconstruction[],
+  questions: AssessmentQuestion[]
+): AssessmentCompletenessResult {
+  const missing: string[] = [];
+  let total = 0, passed = 0;
+  const check = (ok: boolean, label: string) => {
+    total++;
+    if (ok) passed++; else missing.push(label);
+  };
+
+  if (questions.length === 0) {
+    return { missingItems: ["No questions found in this assessment"], totalChecks: 1, passedChecks: 0 };
+  }
+
+  const untagged = questions.filter((q) => q.tags.length === 0);
+  check(untagged.length === 0, untagged.length > 0 ? `${untagged.length} question(s) missing a standard/target tag: Q${untagged.map((q) => q.number).join(", Q")}` : "All questions tagged");
+
+  priorityStandards.forEach((ps) => {
+    const markedCategories = (ps.type || "").split(",").map((c) => c.trim()).filter(Boolean);
+    if (markedCategories.length === 0) return; // type not marked yet - already flagged by template completeness
+    markedCategories.forEach((cat) => {
+      const isAssessed = questions.some((q) =>
+        q.tags.some((t) => normalizeCodes(t.standardCode).some((c) => normalizeCodes(ps.code || "").includes(c)) && t.categories.includes(cat))
+      );
+      check(isAssessed, `${ps.code}: ${cat} target is never assessed by any question`);
+    });
+  });
+
+  return { missingItems: missing, totalChecks: total, passedChecks: passed };
+}
+
+export interface AssessmentAlignmentResult {
+  invalidStandardTags: { questionNumber: string; standardCode: string }[];
+  invalidCategoryTags: { questionNumber: string; standardCode: string; category: string }[];
+}
+
+export function computeAssessmentAlignment(
+  priorityStandards: PriorityStandardDeconstruction[],
+  otherDeconstructedStandards: PriorityStandardDeconstruction[],
+  questions: AssessmentQuestion[]
+): AssessmentAlignmentResult {
+  const allStandards = [...priorityStandards, ...(otherDeconstructedStandards || [])];
+  const invalidStandardTags: AssessmentAlignmentResult["invalidStandardTags"] = [];
+  const invalidCategoryTags: AssessmentAlignmentResult["invalidCategoryTags"] = [];
+
+  questions.forEach((q) => {
+    q.tags.forEach((tag) => {
+      const matchedStandard = allStandards.find((ps) => normalizeCodes(ps.code || "").some((c) => normalizeCodes(tag.standardCode).includes(c)));
+      if (!matchedStandard) {
+        invalidStandardTags.push({ questionNumber: q.number, standardCode: tag.standardCode });
+        return;
+      }
+      const markedCategories = (matchedStandard.type || "").split(",").map((c) => c.trim()).filter(Boolean);
+      tag.categories.forEach((cat) => {
+        if (!markedCategories.includes(cat)) {
+          invalidCategoryTags.push({ questionNumber: q.number, standardCode: tag.standardCode, category: cat });
+        }
+      });
+    });
+  });
+
+  return { invalidStandardTags, invalidCategoryTags };
 }

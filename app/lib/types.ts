@@ -47,10 +47,23 @@ export interface SupportingStandard {
   desc: string;
 }
 
+export interface AssessmentQuestionTag {
+  standardCode: string;
+  categories: string[];
+}
+
+export interface AssessmentQuestion {
+  number: string;
+  text: string;
+  choices: string[];
+  tags: AssessmentQuestionTag[];
+}
+
 export interface AssessmentBlock {
   link?: string;
   scoring?: string;
   warmup?: string;
+  questions?: AssessmentQuestion[];
 }
 
 export interface UnitMap {
