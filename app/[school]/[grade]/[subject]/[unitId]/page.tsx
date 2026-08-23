@@ -186,7 +186,29 @@ INTERNAL UNIT MAP ALIGNMENT, within the Unit Map's own sections (already compute
 
 TEMPLATE COMPLETENESS (checked against the district's required Unit Map template, ${completeness.passedChecks}/${completeness.totalChecks} sections complete): ${
   completeness.missingItems.length === 0 ? "All required template sections are filled in." : `Missing: ${completeness.missingItems.join("; ")}`
-}`;
+}
+
+ASSESSMENT COMPLETENESS (already computed automatically, ${assessmentCompleteness.passedChecks}/${assessmentCompleteness.totalChecks} checks passed): ${
+  assessmentCompleteness.missingItems.length === 0 ? "Every marked target is assessed by at least one tagged question." : `Missing: ${assessmentCompleteness.missingItems.join("; ")}`
+}
+
+ASSESSMENT ALIGNMENT, tag validity (already computed automatically - does each question's tag correspond to a real standard and a category actually marked during deconstruction): ${[
+  assessmentAlignment.invalidStandardTags.length ? assessmentAlignment.invalidStandardTags.map((t) => `Q${t.questionNumber} tagged with unknown standard ${t.standardCode}`).join("; ") : "",
+  assessmentAlignment.invalidCategoryTags.length ? assessmentAlignment.invalidCategoryTags.map((t) => `Q${t.questionNumber} tagged ${t.standardCode}-${t.category}, but that category was never marked for ${t.standardCode}`).join("; ") : "",
+].filter(Boolean).join(" ") || "No tag mismatches detected."}
+
+TAGGED ASSESSMENT QUESTIONS - use your own judgment here, this is NOT pre-computed: for each question below, does the actual question text (and answer choices, if any) genuinely assess what the quoted target language describes, or does it drift toward something easier, harder, or different in kind?
+${allAssessmentQuestions.map((q) => {
+  const tagDescriptions = q.tags.map((t) => {
+    const matched = findMatchingPriorityStandard(t.standardCode, um?.priorityStandards || [], um?.otherDeconstructedStandards || []);
+    return t.categories.map((cat) => {
+      const key = cat === "Knowledge" ? "knowledge" : cat === "Reasoning" ? "reasoning" : cat === "Performance Skill" ? "performanceSkill" : "product";
+      const targetText = (matched?.targets as any)?.[key] || "(target text not found for this tag)";
+      return `${t.standardCode}-${cat}: "${targetText}"`;
+    }).join(" | ");
+  }).join(" | ");
+  return `Q${q.number}: "${q.text}"${q.choices.length ? ` [choices: ${q.choices.join(", ")}]` : ""} — claims to assess: ${tagDescriptions || "UNTAGGED"}`;
+}).join("\n") || "(no tagged assessment questions found for this unit)"}`;
 
   return (
     <div>
