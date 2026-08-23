@@ -423,3 +423,115 @@ export function parseUnitMapRawText(rawText: string): ParsedUnitMap {
 
   return cleanAllStrings(result);
 }
+
+/** Converts every <table> in mammoth's HTML output back into the same
+ * pipe-delimited text format the existing text-based parser already
+ * expects, so parseUnitMapRawText can run unchanged against a much more
+ * reliable input (the actual docx structure) instead of Google Drive's
+ * lossy plain-text export - see the module-level comment for why that
+ * matters (silently shifted/compressed empty cells, no highlight info). */
+export function htmlToUnitMapPipeText(html: string): string {
+  const tables = html.match(/<table[\s\S]*?<\/table>/gi) || [];
+  const tableBlocks = tables.map((tableHtml) => {
+    const rowMatches = tableHtml.match(/<tr[\s\S]*?<\/tr>/gi) || [];
+    const lines = rowMatches.map((rowHtml) => {
+      const cellMatches = rowHtml.match(/<(th|td)[\s\S]*?<\/\1>/gi) || [];
+      const cells = cellMatches.map((c) => {
+        let text = c.replace(/^<(th|td)[^>]*>/i, "").replace(/<\/(th|td)>$/i, "");
+        text = text.replace(/<\/p>\s*<p[^>]*>/gi, " ");
+        text = text.replace(/<[^>]+>/g, "");
+        text = text
+          .replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">")
+          .replace(/&#39;/g, "'").replace(/&quot;/g, '"').replace(/&nbsp;/g, " ");
+        return text.replace(/\s+/g, " ").trim();
+      });
+      return "| " + cells.join(" | ") + " |";
+    });
+    return lines.join("\n");
+  });
+  return tableBlocks.join("\n\n");
+}
+// The plain-text export this parser otherwise runs on has no way to know
+// which codes were actually highlighted in that row - parseTypeMarkingRow
+// can only guess via substring containment, which over-reports whenever a
+// codes-blob is reused across multiple category columns (a real, common
+// pattern - not a copy-paste mistake, since the row is genuinely one blob
+// of codes repeated per category with only some of them meant to be
+// selected via highlighting). When the raw .docx is available, mammoth's
+// HTML output (converted with a "highlight => mark" style map) preserves
+// exactly which codes were highlighted, which is the actual ground truth
+// the source document encodes - confirmed against python-docx's direct
+// XML read of the same file, both agreeing exactly.
+
+function extractCellTextPreservingMarks(cellHtml: string): string {
+  let text = cellHtml.replace(/^<(th|td)[^>]*>/i, "").replace(/<\/(th|td)>$/i, "");
+  text = text.replace(/<\/p>\s*<p[^>]*>/gi, " ");
+  text = text.replace(/<(?!\/?mark\b)[^>]+>/gi, "");
+  text = text
+    .replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">")
+    .replace(/&#39;/g, "'").replace(/&quot;/g, '"').replace(/&nbsp;/g, " ");
+  return text.replace(/\s+/g, " ").trim();
+}
+
+function extractHighlightedText(cellTextWithMarks: string): string {
+  const marks = [...cellTextWithMarks.matchAll(/<mark>([\s\S]*?)<\/mark>/gi)];
+  return marks.map((m) => m[1]).join("");
+}
+
+/** Given the raw HTML of the row containing "Mark the standard type/s"
+ * (from mammoth with a "highlight => mark" style map) and the unit's
+ * chosen priority codes, returns {code: [categories]} based on which
+ * codes are actually highlighted under each category cell - the reliable
+ * ground truth, in place of parseTypeMarkingRow's text-only guess. */
+export function extractHighlightedTypeMarking(fullHtml: string, knownCodes: string[], occurrence = 0): Record<string, string[]> {
+  let searchFrom = 0;
+  let rowIdx = -1;
+  for (let n = 0; n <= occurrence; n++) {
+    rowIdx = fullHtml.indexOf("Mark the standard type", searchFrom);
+    if (rowIdx === -1) return {};
+    searchFrom = rowIdx + 1;
+  }
+  const rowStart = fullHtml.lastIndexOf("<tr>", rowIdx);
+  const rowEndIdx = fullHtml.indexOf("</tr>", rowIdx);
+  if (rowStart === -1 || rowEndIdx === -1) return {};
+  const rowHtml = fullHtml.slice(rowStart, rowEndIdx + 5);
+  const cellMatches = rowHtml.match(/<(th|td)[\s\S]*?<\/\1>/gi) || [];
+
+  const categoryNames = ["Knowledge", "Reasoning", "Performance Skill", "Product"];
+  const result: Record<string, string[]> = {};
+  let i = 1;
+  while (i < cellMatches.length - 1) {
+    const codesCellRaw = extractCellTextPreservingMarks(cellMatches[i]);
+    const categoryCellRaw = extractCellTextPreservingMarks(cellMatches[i + 1]);
+    if (categoryNames.includes(categoryCellRaw)) {
+      const highlightedText = extractHighlightedText(codesCellRaw);
+      if (highlightedText) {
+        knownCodes.forEach((code) => {
+          if (highlightedText.includes(code)) {
+            (result[code] ||= []).push(categoryCellRaw);
+          }
+        });
+      }
+    }
+    i += 2;
+  }
+  return result;
+}
+
+/** Re-parses a unit map's priorityStandards' "type" field using highlight
+ * data from the raw docx's HTML, when available and non-empty for at least
+ * one standard - otherwise leaves the original text-based guess in place
+ * (some documents genuinely have no highlighting applied at all, in which
+ * case falling back is better than reporting nothing marked for anyone). */
+export function refineTypeMarkingWithHighlights(parsed: ParsedUnitMap, fullHtml: string, occurrence = 0): ParsedUnitMap {
+  const codes = parsed.priorityStandards.map((ps) => ps.code);
+  const highlightMap = extractHighlightedTypeMarking(fullHtml, codes, occurrence);
+  if (Object.keys(highlightMap).length === 0) return parsed;
+  return {
+    ...parsed,
+    priorityStandards: parsed.priorityStandards.map((ps) => {
+      const categories = highlightMap[ps.code];
+      return categories ? { ...ps, type: categories.join(", ") } : ps;
+    }),
+  };
+}

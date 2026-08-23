@@ -1,6 +1,6 @@
 "use client";
 import { useState } from "react";
-import { splitIntoUnitChunks, parseUnitMapRawText, type ParsedUnitMap } from "../../lib/parser";
+import { splitIntoUnitChunks, parseUnitMapRawText, htmlToUnitMapPipeText, refineTypeMarkingWithHighlights, type ParsedUnitMap } from "../../lib/parser";
 import { SCHOOLS, GRADES } from "../../lib/data";
 
 interface ExistingUnit {
@@ -43,10 +43,24 @@ export default function AdminImportPage() {
   const [grade, setGrade] = useState("6");
   const [subject, setSubject] = useState("");
   const [rawInput, setRawInput] = useState("");
+  const [uploadedHtml, setUploadedHtml] = useState<string | null>(null);
   const [chunks, setChunks] = useState<ChunkState[] | null>(null);
   const [existingUnits, setExistingUnits] = useState<ExistingUnit[]>([]);
   const [parseError, setParseError] = useState("");
   const [lookupNotice, setLookupNotice] = useState("");
+
+  async function handleFileUpload(file: File) {
+    setParseError("");
+    try {
+      const mammoth = await import("mammoth");
+      const arrayBuffer = await file.arrayBuffer();
+      const result = await mammoth.convertToHtml({ arrayBuffer }, { styleMap: ["highlight => mark"] });
+      setUploadedHtml(result.value);
+      setRawInput(htmlToUnitMapPipeText(result.value));
+    } catch (e: any) {
+      setParseError(`Couldn't read the .docx file: ${e.message || e}`);
+    }
+  }
 
   async function handleParse() {
     setParseError("");
@@ -57,23 +71,32 @@ export default function AdminImportPage() {
       return;
     }
     if (!rawInput.trim()) {
-      setParseError("Paste the raw document text first.");
+      setParseError("Paste the raw document text first, or upload the .docx file above.");
       return;
     }
     try {
       const rawChunks = splitIntoUnitChunks(rawInput);
-      const parsedChunks: ChunkState[] = rawChunks.map((c) => ({
-        title: c.title,
-        rawText: c.text,
-        parsed: parseUnitMapRawText(c.text),
-        linkMode: "new",
-        selectedUnitId: "",
-        newUnitName: c.title.replace(/\s*\(Grade\s*\d+\)\s*$/i, "").trim() || c.title,
-        saveStatus: "idle",
-        saveError: "",
-        diff: null,
-        isReimport: false,
-      }));
+      const parsedChunks: ChunkState[] = rawChunks.map((c, i) => {
+        let parsed = parseUnitMapRawText(c.text);
+        // If a .docx was uploaded, refine the type-marking guess using
+        // actual highlight data - far more reliable than the text-only
+        // substring-containment approach, which can't tell "this code is
+        // highlighted under this category" from "this code merely appears
+        // in a codes-blob that's reused across multiple category cells".
+        if (uploadedHtml) parsed = refineTypeMarkingWithHighlights(parsed, uploadedHtml, i);
+        return {
+          title: c.title,
+          rawText: c.text,
+          parsed,
+          linkMode: "new" as const,
+          selectedUnitId: "",
+          newUnitName: c.title.replace(/\s*\(Grade\s*\d+\)\s*$/i, "").trim() || c.title,
+          saveStatus: "idle" as const,
+          saveError: "",
+          diff: null,
+          isReimport: false,
+        };
+      });
       setChunks(parsedChunks);
 
       const res = await fetch(`/api/admin/units-for-subject?school=${encodeURIComponent(school)}&grade=${encodeURIComponent(grade)}&subject=${encodeURIComponent(trimmedSubject)}`);
@@ -176,13 +199,29 @@ export default function AdminImportPage() {
       </div>
 
       <div className="panel">
-        <div className="panel-head"><h3>2. Paste the raw document text</h3></div>
+        <div className="panel-head"><h3>2. Paste the raw document text, or upload the .docx</h3></div>
         <div className="panel-body">
+          <div className="note-strip">
+            <strong>Recommended: upload the actual .docx file.</strong> Google Drive&apos;s plain-text export can silently
+            drop which specific codes are highlighted in the &quot;Mark the standard type/s&quot; row - the raw file preserves
+            that information exactly, so the type marking comes out more accurate. Pasted text still works, it just falls
+            back to guessing type from which codes merely appear in each cell.
+          </div>
+          <input
+            type="file"
+            accept=".docx"
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              if (file) handleFileUpload(file);
+            }}
+            style={{ marginBottom: 12 }}
+          />
+          {uploadedHtml && <div style={{ fontSize: 12, color: "var(--teal)", marginBottom: 10 }}>.docx loaded - type marking will use actual highlight data.</div>}
           <textarea
             value={rawInput}
-            onChange={(e) => setRawInput(e.target.value)}
+            onChange={(e) => { setRawInput(e.target.value); setUploadedHtml(null); }}
             rows={10}
-            placeholder="Paste the full Drive markdown-table text export here..."
+            placeholder="...or paste the full Drive markdown-table text export here (type marking will be guessed from text alone)"
             style={{ fontFamily: "monospace", fontSize: 11.5 }}
           />
           <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 10 }}>
