@@ -12,9 +12,13 @@ function slugify(name: string): string {
 // on the number extracted from the name is robust to that; matching on the
 // exact string is not, and silently creates a duplicate instead of updating
 // the existing unit - exactly the failure mode this is fixing.
-function extractUnitNumber(name: string): number | null {
-  const m = name.match(/Unit\s+(\d+)/i);
-  return m ? parseInt(m[1], 10) : null;
+// Returns a string key like "4a" or "1" rather than a parsed integer, since
+// some documents split a unit into lettered sub-units ("Unit 4a", "Unit 4b")
+// - parsing to a number would collapse both to 4 and incorrectly treat them
+// as the same unit.
+function extractUnitNumber(name: string): string | null {
+  const m = name.match(/Unit\s+(\d+[a-z]?)\b/i);
+  return m ? m[1].toLowerCase() : null;
 }
 
 export async function POST(req: NextRequest) {
@@ -46,7 +50,7 @@ export async function POST(req: NextRequest) {
       SELECT id, name, sort_order FROM units
       WHERE LOWER(TRIM(school)) = LOWER(${school}) AND LOWER(TRIM(grade)) = LOWER(${grade}) AND LOWER(TRIM(subject)) = LOWER(${subject})
     `;
-    const existingByNumber = new Map<number, any>();
+    const existingByNumber = new Map<string, any>();
     const existingByName = new Map<string, any>();
     existingUnits.forEach((r: any) => {
       const num = extractUnitNumber(r.name);

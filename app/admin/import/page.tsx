@@ -32,10 +32,13 @@ interface ChunkState {
 // Unit Map document titles often carry extra context the Projection Map's
 // own unit name doesn't have (e.g. "Unit 1 History (Grade 6)" vs. just
 // "Unit 1") - matching on the unit's number is far more reliable than an
-// exact string match across those two naming conventions.
-function extractUnitNumber(name: string): number | null {
-  const m = name.match(/Unit\s+(\d+)/i);
-  return m ? parseInt(m[1], 10) : null;
+// exact string match across those two naming conventions. Returns a string
+// key like "4a" rather than a parsed integer, since some documents split a
+// unit into lettered sub-units ("Unit 4a", "Unit 4b") - parsing to a number
+// would collapse both to 4 and incorrectly match them to each other.
+function extractUnitNumber(name: string): string | null {
+  const m = name.match(/Unit\s+(\d+[a-z]?)\b/i);
+  return m ? m[1].toLowerCase() : null;
 }
 
 export default function AdminImportPage() {
