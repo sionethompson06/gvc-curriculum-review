@@ -101,10 +101,13 @@ function buildProjectionMapFromRows(rows: string[][], hasHighlightData = false):
   // rest are unit names, often with an embedded day count in one of a few
   // observed conventions: "Unit 1 28 days", "Unit 1 ~ 15 days", or
   // "Unit 1 # Days 25" (a literal "#" placeholder the teacher filled in
-  // after rather than replacing).
+  // after rather than replacing). Some documents also embed a date range
+  // directly in the header cell alongside the day count (e.g. "Unit 1 #
+  // Days 15 8/12- 9/01") - captured here as a fallback for row 1 below.
   const headerRow = rows[0];
   const unitNames: string[] = [];
   const unitDays: string[] = [];
+  const headerEmbeddedDates: string[] = [];
   for (let i = 1; i < headerRow.length; i++) {
     const cell = cleanCellText(headerRow[i]);
     const dayMatch = cell.match(/#?\s*days?\s*[:\-]?\s*(\d+)|(\d+)\s*days?\b/i);
@@ -117,11 +120,34 @@ function buildProjectionMapFromRows(rows: string[][], hasHighlightData = false):
     // "Unit N" column elsewhere in the same header row.
     unitNames.push(name || `Column ${i}`);
     unitDays.push(days || "");
+    const dateMatch = cell.match(/(\d{1,2}\s*\/\s*\d{1,2})\s*-\s*(\d{1,2}\s*\/\s*\d{1,2})/);
+    headerEmbeddedDates.push(dateMatch ? `${dateMatch[1].replace(/\s+/g, "")}-${dateMatch[2].replace(/\s+/g, "")}` : "");
   }
 
-  // Row 1: dates row - first cell is a label like "'26-'27 Dates" (skipped).
+  // Row 1 is usually a pure "dates" row, but at least one real document (a
+  // PE projection map) merges it with the first strand's content - its
+  // label reads "'25-'26 Dates (standard type)", and only some of its
+  // cells actually look like dates while the rest hold real standards
+  // content that a blanket "row 1 is always dates, always skip it" rule
+  // would silently drop. Check each cell individually: use it as a date
+  // if it looks like one (short, contains a slash-separated day/month
+  // pair), otherwise fall back to any date embedded in that column's
+  // header cell, and let the strand-grouping loop below include row 1 as
+  // real content instead of skipping it outright.
+  const looksLikeDate = (text: string) => {
+    const t = text.trim();
+    return !!t && t.length <= 24 && /\d{1,2}\s*\/\s*\d{1,2}/.test(t);
+  };
   const datesRow = rows[1] || [];
-  const unitDates: string[] = unitNames.map((_, i) => cleanCellText(datesRow[i + 1] || ""));
+  const unitDates: string[] = unitNames.map((_, i) => {
+    const cell = cleanCellText(datesRow[i + 1] || "");
+    return looksLikeDate(cell) ? cell : (headerEmbeddedDates[i] || "");
+  });
+  const row1HasNonDateContent = datesRow.some((c, i) => {
+    if (i === 0) return false;
+    const cell = cleanCellText((c || "").replace(/<\/?mark>/gi, ""));
+    return !!cell.trim() && !looksLikeDate(cell);
+  });
 
   const units: ParsedProjectionUnit[] = unitNames.map((name, i) => ({
     name, days: unitDays[i] || "", dates: unitDates[i] || "", cells: {},
@@ -138,7 +164,8 @@ function buildProjectionMapFromRows(rows: string[][], hasHighlightData = false):
   // source document happened to spread it across.
   type StrandGroup = { label: string; rows: string[][] };
   const groups: StrandGroup[] = [];
-  for (let r = 2; r < rows.length; r++) {
+  const strandStartRow = row1HasNonDateContent ? 1 : 2;
+  for (let r = strandStartRow; r < rows.length; r++) {
     const row = rows[r];
     const rawLabel = (row[0] || "").replace(/<\/?mark>/gi, "");
     const cleanLabel = cleanCellText(rawLabel);
