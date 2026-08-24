@@ -30,8 +30,22 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "school, grade, subject, and units are required" }, { status: 400 });
     }
 
+    // Resolve to an existing subject name case-insensitively, if one
+    // already exists, rather than creating a new, differently-cased
+    // duplicate row. This is the actual root cause of a real production
+    // bug: the units lookup below was already case-insensitive (from an
+    // earlier fix), so a typo like "HIstory" correctly matched and updated
+    // the real "History" units - but this subjects upsert was still an
+    // exact match, so the typo silently created an ORPHANED "HIstory" row
+    // with zero associated units. subjectFromSlug's case-insensitive slug
+    // matching would then sometimes resolve to that orphaned name instead
+    // of the real one, breaking the entire subject page and every unit
+    // page under it.
+    const { rows: existingSubjectRows } = await sql`SELECT name FROM subjects WHERE LOWER(TRIM(name)) = LOWER(TRIM(${subject}))`;
+    const resolvedSubject = existingSubjectRows[0]?.name || subject;
+
     await sql`
-      INSERT INTO subjects (name, strands) VALUES (${subject}, ${JSON.stringify(strandNames || [])})
+      INSERT INTO subjects (name, strands) VALUES (${resolvedSubject}, ${JSON.stringify(strandNames || [])})
       ON CONFLICT (name) DO UPDATE SET strands = EXCLUDED.strands
     `;
 
@@ -48,7 +62,7 @@ export async function POST(req: NextRequest) {
     // updating it - confirmed as the actual cause of a real duplication.
     const { rows: existingUnits } = await sql`
       SELECT id, name, sort_order FROM units
-      WHERE LOWER(TRIM(school)) = LOWER(${school}) AND LOWER(TRIM(grade)) = LOWER(${grade}) AND LOWER(TRIM(subject)) = LOWER(${subject})
+      WHERE LOWER(TRIM(school)) = LOWER(${school}) AND LOWER(TRIM(grade)) = LOWER(${grade}) AND LOWER(TRIM(subject)) = LOWER(${resolvedSubject})
     `;
     const existingByNumber = new Map<string, any>();
     const existingByName = new Map<string, any>();
@@ -73,7 +87,7 @@ export async function POST(req: NextRequest) {
         const id = `u${slugify(unit.name)}${Date.now().toString(36).slice(-5)}${Math.random().toString(36).slice(2, 5)}`;
         await sql`
           INSERT INTO units (id, school, grade, subject, name, days, dates, cells, sort_order)
-          VALUES (${id}, ${school}, ${grade}, ${subject}, ${unit.name}, ${unit.days || ""}, ${unit.dates || ""}, ${JSON.stringify(unit.cells || {})}, ${nextOrder})
+          VALUES (${id}, ${school}, ${grade}, ${resolvedSubject}, ${unit.name}, ${unit.days || ""}, ${unit.dates || ""}, ${JSON.stringify(unit.cells || {})}, ${nextOrder})
         `;
         nextOrder++;
         created++;

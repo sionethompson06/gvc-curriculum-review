@@ -21,9 +21,15 @@ export async function POST(req: NextRequest) {
     // that look up the subject by slug (the subject page, the unit detail
     // page) 404 even though the unit itself is saved and shows up in the
     // sidebar (which reads unit rows directly, not the subjects table).
-    // Preserves any existing strands list if the subject is already there.
+    // Resolve to an existing subject name case-insensitively first, rather
+    // than creating a new, differently-cased duplicate row - a real,
+    // confirmed bug (a "History"/"HIstory" split orphaned the real subject
+    // from subjectFromSlug's slug-based lookup, breaking the entire
+    // subject page and every unit page under it).
+    const { rows: existingSubjectRows } = await sql`SELECT name FROM subjects WHERE LOWER(TRIM(name)) = LOWER(TRIM(${subject}))`;
+    const resolvedSubject = existingSubjectRows[0]?.name || subject;
     await sql`
-      INSERT INTO subjects (name, strands) VALUES (${subject}, '[]')
+      INSERT INTO subjects (name, strands) VALUES (${resolvedSubject}, '[]')
       ON CONFLICT (name) DO NOTHING
     `;
 
@@ -41,7 +47,7 @@ export async function POST(req: NextRequest) {
                um.priority_standards, um.other_deconstructed_standards, um.supporting_standards,
                um.pre_assessment, um.post_assessment, um.common_assessment, um.curriculum_rows, um.start_date, um.end_date
         FROM units u LEFT JOIN unit_maps um ON um.unit_id = u.id
-        WHERE u.id = ${unitId} AND LOWER(TRIM(u.school)) = LOWER(${school}) AND LOWER(TRIM(u.grade)) = LOWER(${grade}) AND LOWER(TRIM(u.subject)) = LOWER(${subject})
+        WHERE u.id = ${unitId} AND LOWER(TRIM(u.school)) = LOWER(${school}) AND LOWER(TRIM(u.grade)) = LOWER(${grade}) AND LOWER(TRIM(u.subject)) = LOWER(${resolvedSubject})
       `;
       if (rows.length === 0) {
         return NextResponse.json({ error: `Unit id ${unitId} not found for ${school}/${grade}/${subject}` }, { status: 404 });
@@ -66,12 +72,12 @@ export async function POST(req: NextRequest) {
       // Projection Map import fills them in separately; this at minimum
       // lets the Unit Map itself be reviewed right away, and the app's own
       // Projection Map Completeness check will correctly flag the gap.
-      const { rows: maxOrderRows } = await sql`SELECT COALESCE(MAX(sort_order), -1) + 1 AS next_order FROM units WHERE LOWER(TRIM(school)) = LOWER(${school}) AND LOWER(TRIM(grade)) = LOWER(${grade}) AND LOWER(TRIM(subject)) = LOWER(${subject})`;
+      const { rows: maxOrderRows } = await sql`SELECT COALESCE(MAX(sort_order), -1) + 1 AS next_order FROM units WHERE LOWER(TRIM(school)) = LOWER(${school}) AND LOWER(TRIM(grade)) = LOWER(${grade}) AND LOWER(TRIM(subject)) = LOWER(${resolvedSubject})`;
       const nextOrder = maxOrderRows[0]?.next_order ?? 0;
       unitId = `u${slugify(unitName)}${Date.now().toString(36).slice(-5)}`;
       await sql`
         INSERT INTO units (id, school, grade, subject, name, days, dates, cells, sort_order)
-        VALUES (${unitId}, ${school}, ${grade}, ${subject}, ${unitName}, '', '', '{}', ${nextOrder})
+        VALUES (${unitId}, ${school}, ${grade}, ${resolvedSubject}, ${unitName}, '', '', '{}', ${nextOrder})
       `;
       unitRow = { id: unitId, name: unitName, days: "", dates: "", cells: {} };
     }
