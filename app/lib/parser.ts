@@ -61,19 +61,29 @@ export function parseRows(rawText: string): string[][] {
  * preceding character is a letter glued directly against a leading digit. */
 export function extractCodes(text: string): string[] {
   const t = cleanMarkdownLinks(text);
-  const patterns = [
-    /(?<!\d)\d{1,2}\.[A-Z]{1,4}\.\d{1,2}(?:\.\d{1,2})?/g, // 6.RP.1, 6.NS.3
-    /(?<![A-Z])ELD\.[A-Z]{1,3}\.\d{1,2}\.\d{1,2}/g, // ELD.PI.8.1
-    /(?<![A-Z])MP\.\d{1,2}/g, // MP.1
-    /(?<![A-Z])[A-Z]{1,2}-[A-Z]{2,4}\d-\d{1,2}(?!\d)/g, // MS-LS1-1, MS-ETS1-4 (NGSS-style; both boundaries use lookarounds - not \b - since these are sometimes glued directly to surrounding words with no space)
-    /(?<![A-Z])HSS-\d{1,2}\.\d{1,2}(?:\.\d{1,2})?(?!\d)/g, // HSS-7.1, HSS-6.2.4 (official CA Dept of Education History-Social Science standard identifier format)
-    /(?<![A-Z])[A-Z]{1,2}\.\d{1,2}\.\d{1,2}(?!\d)/g, // RL.6.1, W.6.2, SL.6.1 (ELA-style; letters-first, the reverse order from CCSS Math's grade-first "6.RP.1" - must be checked before the bare-digit pattern below or "RL.6.1" gets silently stripped down to just "6.1")
-    /(?<!\d)\d{1,2}\.\d{1,2}(?:\.\d{1,2})?(?!\d)/g, // 6.1, 6.1.2 (bare, e.g. History)
+  const patterns: { re: RegExp; normalize?: (raw: string) => string }[] = [
+    { re: /(?<!\d)\d{1,2}\.[A-Z]{1,4}\.\d{1,2}(?:\.\d{1,2})?/g }, // 6.RP.1, 6.NS.3
+    { re: /(?<![A-Z])ELD\.[A-Z]{1,3}\.\d{1,2}\.\d{1,2}/g }, // ELD.PI.8.1
+    { re: /(?<![A-Z])MP\.\d{1,2}/g }, // MP.1
+    { re: /(?<![A-Z])[A-Z]{1,2}-[A-Z]{2,4}\d-\d{1,2}(?!\d)/g }, // MS-LS1-1, MS-ETS1-4 (NGSS-style; both boundaries use lookarounds - not \b - since these are sometimes glued directly to surrounding words with no space)
+    { re: /(?<![A-Z])HSS-\d{1,2}\.\d{1,2}(?:\.\d{1,2})?(?!\d)/g }, // HSS-7.1, HSS-6.2.4 (official CA Dept of Education History-Social Science standard identifier format)
+    // ELA/PE-style, letters-first: RL.6.1, W.6.2, SL.6.1, PE.7.4.1 - up to
+    // three digit groups (PE genuinely uses a 3-part code, unlike ELA's
+    // 2-part) - must be checked before the bare-digit pattern below or
+    // these get silently stripped down to just the trailing digits.
+    { re: /(?<![A-Z])[A-Z]{1,2}\.\d{1,2}\.\d{1,2}(?:\.\d{1,2})?(?!\d)/g },
+    // Same shape, but with a hyphen after the letters instead of a dot -
+    // PE's own source documents use both "PE.7.2.2" and "PE-7.2.2" for the
+    // SAME standard inconsistently within one document. Normalized to the
+    // dot form so both spellings resolve to the same code everywhere else
+    // in the app (alignment checks, type-marking, priority detection).
+    { re: /(?<![A-Z])[A-Z]{1,2}-\d{1,2}\.\d{1,2}(?:\.\d{1,2})?(?!\d)/g, normalize: (raw) => raw.replace("-", ".") },
+    { re: /(?<!\d)\d{1,2}\.\d{1,2}(?:\.\d{1,2})?(?!\d)/g }, // 6.1, 6.1.2 (bare, e.g. History)
   ];
   const allMatches: { start: number; end: number; code: string }[] = [];
-  for (const pattern of patterns) {
-    for (const m of t.matchAll(pattern)) {
-      allMatches.push({ start: m.index!, end: m.index! + m[0].length, code: m[0] });
+  for (const { re, normalize } of patterns) {
+    for (const m of t.matchAll(re)) {
+      allMatches.push({ start: m.index!, end: m.index! + m[0].length, code: normalize ? normalize(m[0]) : m[0] });
     }
   }
   // Resolve overlaps: prefer longer matches; sort by start asc, length desc,

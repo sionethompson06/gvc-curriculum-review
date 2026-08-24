@@ -18,7 +18,7 @@ Assessment questions are tagged inline by the teacher with which standard and ta
 ${context}
 
 Give a tight, specific, constructive review (not generic praise) covering exactly these seven things, each 2-3 sentences:
-1. Template completeness - react to the completeness check above. Is the team on track, or are there real gaps to close?
+1. Template completeness - react to the completeness check above, AND to the Projection Map priority clarity finding if any standards were flagged - is the team on track, or are there real gaps to close? If priority status is unclear for any standards, name them and say plainly that this needs to be resolved by the team marking their Projection Map clearly (highlighting or explicit labeling) - do not speculate about which of those standards are likely priority.
 2. Deconstruction quality - are targets genuinely teachable concepts/skills, or vague? If any "off-verb" findings are listed above, react to them specifically using the rubric's own logic - is the type marking overreaching beyond what the standard's verb calls for, or was a target undermarked?
 3. External alignment - react to the Projection Map vs Unit Map alignment findings above; what should the team fix?
 4. Internal alignment - react to the internal Unit Map alignment findings above (standards dropped between deconstruction and the curriculum map, type/target mismatches, or off-verb findings); what should the team fix?

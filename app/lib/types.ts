@@ -2,6 +2,7 @@ export interface StandardEntry {
   code: string;
   desc: string;
   priority: boolean;
+  priorityUnclear?: boolean;
   needsSupplement: boolean;
   partial: boolean;
 }

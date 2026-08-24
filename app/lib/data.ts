@@ -134,7 +134,13 @@ export async function getNotesForUnit(unitId: string) {
 // --- Standard code normalization for alignment checking (pure functions, no DB) ---
 function extractStandardTokens(text: string): string[] {
   if (!text) return [];
-  const t = text.replace(/CCSS\.ELA-LITERACY\./gi, "").replace(/CCSS\.MATH\.CONTENT\./gi, "").replace(/(?<![A-Z])HSS-/g, "");
+  let t = text.replace(/CCSS\.ELA-LITERACY\./gi, "").replace(/CCSS\.MATH\.CONTENT\./gi, "").replace(/(?<![A-Z])HSS-/g, "");
+  // PE's own source documents use both "PE.7.2.2" and "PE-7.2.2" for the
+  // SAME standard inconsistently within one document. Without this, the
+  // hyphen form loses its letter prefix entirely in re2 below (matching
+  // only the bare "7.2.2"), so the two spellings would never be recognized
+  // as the same code during alignment checking.
+  t = t.replace(/(?<![A-Z])([A-Z]{1,2})-(\d{1,2}\.\d{1,2}(?:\.\d{1,2})?)(?!\d)/g, "$1.$2");
   const tokens: string[] = [];
   // Letter-prefix codes (RH, WH, ELD.PI, MP, RP, NS, EE, SP, G, etc.) are always
   // uppercase in every real source document seen so far. Restricting to [A-Z]
@@ -224,6 +230,29 @@ export interface AlignmentResult {
     startDiff: number | null; endDiff: number | null;
   };
   hasUnitMap: boolean;
+}
+
+export interface PriorityClarityResult {
+  unclearEntries: { strand: string; code: string; desc: string }[];
+}
+
+/** Surfaces standards on the Projection Map whose priority status couldn't
+ * be determined from the source document - no highlight data available
+ * (e.g. a PDF source, or a docx where the team never used highlighting)
+ * and no explicit "(Priority)"/"Supporting" wording in the strand label
+ * either. This is deliberately reported as a finding for the team to
+ * resolve in their next revision, not silently defaulted to true or false -
+ * see buildEntriesForCell in projectionParser.ts for where this is set. */
+export function computeProjectionMapPriorityClarity(unit: Unit): PriorityClarityResult {
+  const unclearEntries: { strand: string; code: string; desc: string }[] = [];
+  Object.entries(unit.cells || {}).forEach(([strand, entries]) => {
+    entries.forEach((e) => {
+      if (e.priorityUnclear && e.code) {
+        unclearEntries.push({ strand, code: e.code, desc: e.desc });
+      }
+    });
+  });
+  return { unclearEntries };
 }
 
 export function computeUnitAlignment(unit: Unit, um: UnitMap | null): AlignmentResult {

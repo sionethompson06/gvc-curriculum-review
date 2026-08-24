@@ -2,7 +2,7 @@ import { notFound } from "next/navigation";
 import Breadcrumb from "../../../../components/Breadcrumb";
 import ReviewPanel from "../../../../components/ReviewPanel";
 import NotesPanel from "../../../../components/NotesPanel";
-import { schoolFromSlug, subjectFromSlug, getMap, computeUnitAlignment, computeInternalAlignment, computeTemplateCompleteness, computeAssessmentCompleteness, computeAssessmentAlignment, getReviewsForUnit, getNotesForUnit, matchTargetStatementToCategory, findMatchingPriorityStandard } from "../../../../lib/data";
+import { schoolFromSlug, subjectFromSlug, getMap, computeUnitAlignment, computeProjectionMapPriorityClarity, computeInternalAlignment, computeTemplateCompleteness, computeAssessmentCompleteness, computeAssessmentAlignment, getReviewsForUnit, getNotesForUnit, matchTargetStatementToCategory, findMatchingPriorityStandard } from "../../../../lib/data";
 import type { CurriculumRow, PriorityStandardDeconstruction } from "../../../../lib/types";
 
 export const dynamic = "force-dynamic";
@@ -131,6 +131,7 @@ export default async function UnitPage({ params }: { params: { school: string; g
   if (!map || !unit) return notFound();
   const um = map.unitMaps[unit.id] || null;
   const align = computeUnitAlignment(unit, um);
+  const priorityClarity = computeProjectionMapPriorityClarity(unit);
   const internalAlign = computeInternalAlignment(um);
   const completeness = computeTemplateCompleteness(um);
   const allAssessmentQuestions = [
@@ -176,6 +177,12 @@ ALIGNMENT CHECK, Projection Map vs Unit Map (already computed automatically): ${
   align.dateIssue?.kind === "missingProjectionDates" ? `Projection Map has no dates on file for this unit, so its timeline can't be checked against the Unit Map's stated ${align.dateIssue.umStart}-${align.dateIssue.umEnd}.` : "",
   align.dateIssue?.kind === "missingUnitMapDates" ? `Unit Map never filled in its own Plan Start/End Date fields, so it can't be checked against the Projection Map's ${align.dateIssue.projStart}-${align.dateIssue.projEnd} window.` : "",
 ].filter(Boolean).join(" ")}
+
+PROJECTION MAP PRIORITY CLARITY (already computed automatically - this is a source-document quality issue, not something to infer or guess around): ${
+  priorityClarity.unclearEntries.length === 0
+    ? "Every standard's priority status is either highlighted or explicitly labeled on the Projection Map."
+    : `The following standards have no highlighting and no explicit "(Priority)"/"Supporting" label on the Projection Map, so their priority status cannot be determined and must not be assumed: ${priorityClarity.unclearEntries.map((e) => `${e.code} (${e.strand})`).join(", ")}. This should be reported as a real gap for the team to resolve by clearly marking these in their next revision - do not guess which ones are actually priority.`
+}
 
 INTERNAL UNIT MAP ALIGNMENT, within the Unit Map's own sections (already computed automatically): ${[
   internalAlign.priorityMissingFromCurriculumMap.length ? `Chosen priority standard(s) never added to the Unit Curriculum Map: ${internalAlign.priorityMissingFromCurriculumMap.join(", ")}` : "",
@@ -243,6 +250,22 @@ ${allAssessmentQuestions.map((q) => {
             {align.dateIssue && align.dateIssue.kind === "mismatch" && (
               <div><span className="badge badge-flag">Timeline gap</span> Projection: {align.dateIssue.projStart}–{align.dateIssue.projEnd}. Unit Map: {align.dateIssue.umStart}–{align.dateIssue.umEnd}.</div>
             )}
+          </div>
+        </div>
+      )}
+
+      {priorityClarity.unclearEntries.length > 0 && (
+        <div className="panel" style={{ borderColor: "var(--rust)" }}>
+          <div className="panel-head" style={{ background: "var(--rust-soft)" }}><h3 style={{ color: "var(--rust)" }}>Priority Standards Not Clearly Marked (Projection Map)</h3></div>
+          <div className="panel-body">
+            <p style={{ marginTop: 0, marginBottom: 10, fontSize: 13.5, color: "var(--ink-soft)" }}>
+              These standards on the Projection Map have no highlighting and no explicit "(Priority)" or "Supporting" label to indicate their status — this can't be inferred, so it's reported here for the team to mark clearly in their next revision.
+            </p>
+            {priorityClarity.unclearEntries.map((e, i) => (
+              <div key={i} style={{ marginBottom: 6 }}>
+                <span className="badge badge-flag">Not marked</span> <strong>{e.code}</strong> ({e.strand}) — priority status not clear on the Projection Map.
+              </div>
+            ))}
           </div>
         </div>
       )}

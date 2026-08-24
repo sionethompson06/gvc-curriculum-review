@@ -41,42 +41,57 @@ const STOP_PATTERNS = [
   /^Standard\s*$/i,
 ];
 
-/** Builds one or more StandardEntry objects for a single cell. When real
- * highlight data is available (hasHighlightData=true - i.e. this document
- * was uploaded as .docx, not pasted as plain text), each recognizable code
- * in the cell gets its OWN entry with priority based on whether that
- * specific code is actually highlighted - a cell can genuinely mix
+/** Builds one or more StandardEntry objects for a single cell.
+ *
+ * Priority is only ever asserted from a real signal in the source document:
+ * (1) per-code highlight data, when available - a cell can genuinely mix
  * priority and supporting standards together (e.g. Math's "Ratio &
  * Introductory Number System" cell highlights only "6.RP.1-3", leaving
- * "6.NS.1-3" and "6.EE1-2" in the same cell unhighlighted/supporting).
- * Falls back to one whole-cell entry using the strand-name default when
- * there's no highlight data to go on, or the cell has no recognizable
- * codes to split by (e.g. plain prose like "Routines"). */
-function buildEntriesForCell(cellTextWithMarks: string, hasHighlightData: boolean, defaultPriority: boolean): StandardEntry[] {
+ * "6.NS.1-3" and "6.EE1-2" in the same cell unhighlighted/supporting); or
+ * (2) explicit strand-label wording ("(Priority)", "Supporting") - itself a
+ * real, literal statement from the document, not an inference.
+ *
+ * When NEITHER signal is available - no highlight data at all (e.g. a PDF
+ * source, or a docx where the team never used highlighting) and no
+ * "(Priority)"/"Supporting" wording in the strand name - this deliberately
+ * does NOT default to true or false. Priority is left unclear and flagged
+ * via priorityUnclear, so the completeness check reports "priority
+ * standards not clearly marked" as a finding for the team to resolve in
+ * their next revision, rather than the tool silently guessing on their
+ * behalf. Cells with no recognizable standard code at all (plain prose
+ * like "Introductions") aren't flagged - there's no standard being
+ * categorized, so priority doesn't apply. */
+function buildEntriesForCell(cellTextWithMarks: string, hasHighlightData: boolean, strandName: string): StandardEntry[] {
   const plainText = cellTextWithMarks.replace(/<\/?mark>/gi, "");
   if (!plainText.trim()) return [];
 
+  const codes = extractCodes(plainText);
+  if (codes.length === 0) {
+    return [{ code: "", desc: plainText, priority: false, needsSupplement: plainText.includes("*"), partial: false }];
+  }
+
   if (hasHighlightData) {
-    const codes = extractCodes(plainText);
-    if (codes.length > 0) {
-      const highlightedText = extractHighlightedText(cellTextWithMarks);
+    const highlightedText = extractHighlightedText(cellTextWithMarks);
+    if (highlightedText) {
       return codes.map((code) => ({
-        code,
-        desc: plainText,
-        priority: highlightedText.includes(code),
-        needsSupplement: plainText.includes("*"),
-        partial: false,
+        code, desc: plainText, priority: highlightedText.includes(code),
+        needsSupplement: plainText.includes("*"), partial: false,
       }));
     }
   }
 
-  return [{
-    code: "",
-    desc: plainText,
-    priority: defaultPriority,
-    needsSupplement: plainText.includes("*"),
-    partial: false,
-  }];
+  const lowerStrand = strandName.toLowerCase();
+  if (lowerStrand.includes("supporting")) {
+    return codes.map((code) => ({ code, desc: plainText, priority: false, needsSupplement: plainText.includes("*"), partial: false }));
+  }
+  if (lowerStrand.includes("priority")) {
+    return codes.map((code) => ({ code, desc: plainText, priority: true, needsSupplement: plainText.includes("*"), partial: false }));
+  }
+
+  return codes.map((code) => ({
+    code, desc: plainText, priority: false, priorityUnclear: true,
+    needsSupplement: plainText.includes("*"), partial: false,
+  }));
 }
 
 function buildProjectionMapFromRows(rows: string[][], hasHighlightData = false): ParsedProjectionMap {
@@ -142,15 +157,9 @@ function buildProjectionMapFromRows(rows: string[][], hasHighlightData = false):
     const strandName = group.label;
     strandNames.push(strandName);
 
-    const lowerStrand = strandName.toLowerCase();
-    let defaultPriority = true;
-    if (lowerStrand.includes("supporting")) defaultPriority = false;
-    // Used only as a fallback when there's no highlight data to check -
-    // "priority" or an unlabeled theme row (e.g. Math) both default to true.
-
     for (let i = 0; i < units.length; i++) {
       const combinedCell = group.rows.map((row) => row[i + 1] || "").filter((c) => c.trim()).join(" ");
-      const entries = buildEntriesForCell(combinedCell, hasHighlightData, defaultPriority);
+      const entries = buildEntriesForCell(combinedCell, hasHighlightData, strandName);
       if (entries.length === 0) continue;
       (units[i].cells[strandName] ||= []).push(...entries);
     }
