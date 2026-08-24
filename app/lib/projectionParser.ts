@@ -95,7 +95,12 @@ function buildProjectionMapFromRows(rows: string[][], hasHighlightData = false):
     const dayMatch = cell.match(/#?\s*days?\s*[:\-]?\s*(\d+)|(\d+)\s*days?\b/i);
     const days = dayMatch ? (dayMatch[1] || dayMatch[2]) : "";
     const name = dayMatch ? cell.slice(0, dayMatch.index).replace(/[~\s]+$/, "").trim() : cell.trim();
-    unitNames.push(name || `Unit ${i}`);
+    // "Column ${i}" rather than "Unit ${i}" - an unnamed column (e.g. this
+    // grade's document leaves the first data column label blank, even
+    // though it holds real Beginning-of-School content like "Introductions"
+    // / "Notebook prep") must not risk colliding with a genuinely-named
+    // "Unit N" column elsewhere in the same header row.
+    unitNames.push(name || `Column ${i}`);
     unitDays.push(days || "");
   }
 
