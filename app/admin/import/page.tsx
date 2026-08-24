@@ -36,8 +36,12 @@ interface ChunkState {
 // key like "4a" rather than a parsed integer, since some documents split a
 // unit into lettered sub-units ("Unit 4a", "Unit 4b") - parsing to a number
 // would collapse both to 4 and incorrectly match them to each other.
+// Anchored to the start - a descriptive name that merely mentions a unit
+// number somewhere in its text must never match here (an unanchored
+// version of this exact function once silently overwrote a real unit by
+// matching on a unit number mentioned in an unrelated flagged unit's name).
 function extractUnitNumber(name: string): string | null {
-  const m = name.match(/Unit\s+(\d+[a-z]?)\b/i);
+  const m = name.match(/^Unit\s+(\d+[a-z]?)\b/i);
   return m ? m[1].toLowerCase() : null;
 }
 

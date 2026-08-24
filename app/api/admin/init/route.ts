@@ -18,7 +18,14 @@ export async function POST() {
 // school". Returns a string key ("4a") rather than a parsed integer since
 // some documents split units into lettered sub-units (Unit 4a / Unit 4b).
 function extractUnitNumber(name: string): string | null {
-  const m = name.match(/Unit\s+(\d+[a-z]?)\b/i);
+  // Anchored to the start - a descriptive name that merely MENTIONS a unit
+  // number somewhere in its text (e.g. a flagged/disputed unit's
+  // explanatory name) must never match here. A real, unanchored match on
+  // this exact function once matched a flagged unit's name against the
+  // wrong existing unit purely because the word "Unit 3" appeared in its
+  // explanation text, silently overwriting that real unit's name, dates,
+  // and Projection Map content.
+  const m = name.match(/^Unit\s+(\d+[a-z]?)\b/i);
   return m ? m[1].toLowerCase() : null;
 }
 

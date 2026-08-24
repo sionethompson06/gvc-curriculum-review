@@ -16,8 +16,15 @@ function slugify(name: string): string {
 // some documents split a unit into lettered sub-units ("Unit 4a", "Unit 4b")
 // - parsing to a number would collapse both to 4 and incorrectly treat them
 // as the same unit.
+// Anchored to the start - a descriptive name that merely MENTIONS a unit
+// number somewhere in its text (e.g. a flagged/disputed unit's
+// explanatory name) must never match here. An unanchored version of this
+// exact function once matched a flagged unit's name against the wrong
+// existing unit purely because the word "Unit 3" appeared in its
+// explanation text, silently overwriting that real unit's name, dates,
+// and Projection Map content.
 function extractUnitNumber(name: string): string | null {
-  const m = name.match(/Unit\s+(\d+[a-z]?)\b/i);
+  const m = name.match(/^Unit\s+(\d+[a-z]?)\b/i);
   return m ? m[1].toLowerCase() : null;
 }
 
