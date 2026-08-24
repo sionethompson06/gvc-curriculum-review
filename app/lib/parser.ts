@@ -63,6 +63,7 @@ export function extractCodes(text: string): string[] {
   const t = cleanMarkdownLinks(text);
   const patterns: { re: RegExp; normalize?: (raw: string) => string }[] = [
     { re: /(?<!\d)\d{1,2}\.[A-Z]{1,4}\.\d{1,2}(?:\.\d{1,2})?/g }, // 6.RP.1, 6.NS.3
+    { re: /(?<!\d)\d{1,2}\.[A-Z]{1,4}\.[A-Z]\.\d{1,2}(?:\.\d{1,2})?/g }, // 5.NBT.A.1, 5.MD.C.3 (official CCSS Math format with a cluster letter between domain and standard number - coexists with the shorter 3-part form for the same standard within the same document)
     { re: /(?<![A-Z])ELD\.[A-Z]{1,3}\.\d{1,2}\.\d{1,2}/g }, // ELD.PI.8.1
     { re: /(?<![A-Z])MP\.\d{1,2}/g }, // MP.1
     { re: /(?<![A-Z])[A-Z]{1,2}-[A-Z]{2,4}\d-\d{1,2}(?!\d)/g }, // MS-LS1-1, MS-ETS1-4 (NGSS-style; both boundaries use lookarounds - not \b - since these are sometimes glued directly to surrounding words with no space)
@@ -191,14 +192,42 @@ function cleanAllStrings(obj: any, parentKey?: string): any {
  * text is returned as a single chunk (the common case: a document already
  * scoped to one unit). */
 export function splitIntoUnitChunks(rawText: string): { title: string; text: string }[] {
-  const delimiterRe = /^Unit\s+\d+[^\n]*\(Grade\s+\d+\)\s*$/gm;
-  const matches = [...rawText.matchAll(delimiterRe)];
-  if (matches.length === 0) return [{ title: "Unit 1", text: rawText }];
+  // Two conventions seen in real documents: a bare standalone paragraph
+  // line between tables ("Unit 2 History (Grade 6)"), or the unit title as
+  // a single-cell table row of its own - i.e. wrapped in pipe characters
+  // ("| Unit 1 Mathematics (Grade 5) |") when each unit is its own
+  // separate table rather than one shared table with a plain-text label
+  // between sections. Both must match, or documents using the latter
+  // convention get silently read as a single giant "unit" containing every
+  // real unit's content concatenated together.
+  const delimiterRe = /^\|?\s*Unit\s+\d+(?!\s*-\s*Curriculum Map)[^\n|]*\(Grade\s+\d+\)\s*\|?\s*$/gm;
+  const rawMatches = [...rawText.matchAll(delimiterRe)];
+  if (rawMatches.length === 0) return [{ title: "Unit 1", text: rawText }];
+  const extractNum = (title: string) => title.match(/Unit\s+(\d+)/i)?.[1] ?? null;
+  // Some documents redundantly restate the unit title multiple times: once
+  // as a bare "between tables" paragraph line immediately followed by a
+  // pipe-wrapped in-table title (proximity case - collapse if close
+  // together, keeping the first since it's proven more reliable when the
+  // in-table title goes stale from a copied previous unit), or as the same
+  // "Unit N" title repeated as the first row of several separate tables
+  // spread across the whole unit's content (number case - collapse if the
+  // extracted unit number matches the most recently kept match, regardless
+  // of distance, since there's no other unit's boundary in between).
+  // Neither rule alone covers both real cases seen; both together do.
+  const matches: typeof rawMatches = [];
+  rawMatches.forEach((m, i) => {
+    if (i === 0) { matches.push(m); return; }
+    const prev = matches[matches.length - 1];
+    const closeby = m.index! - (prev.index! + prev[0].length) <= 300;
+    const sameNumber = extractNum(m[0]) !== null && extractNum(m[0]) === extractNum(prev[0]);
+    if (!closeby && !sameNumber) matches.push(m);
+  });
   const chunks: { title: string; text: string }[] = [];
   matches.forEach((m, i) => {
     const start = m.index!;
     const end = i + 1 < matches.length ? matches[i + 1].index! : rawText.length;
-    chunks.push({ title: m[0].trim(), text: rawText.slice(start, end) });
+    const title = m[0].trim().replace(/^\|\s*/, "").replace(/\s*\|$/, "").trim();
+    chunks.push({ title, text: rawText.slice(start, end) });
   });
   return chunks;
 }
