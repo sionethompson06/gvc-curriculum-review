@@ -36,7 +36,16 @@ export async function POST(req: NextRequest) {
     // match only for units with no number in their name (e.g. "Beginning
     // of school"). Preserves the existing id either way, and therefore any
     // Unit Map already linked to it.
-    const { rows: existingUnits } = await sql`SELECT id, name, sort_order FROM units WHERE school = ${school} AND grade = ${grade} AND subject = ${subject}`;
+    // Case-insensitive, whitespace-tolerant match - the same fix already
+    // applied to units-for-subject. An exact match here is the more severe
+    // failure mode of the two: it doesn't just leave a dropdown empty, it
+    // silently treats EVERY unit as new on the slightest casing/whitespace
+    // difference, duplicating the entire projection map rather than
+    // updating it - confirmed as the actual cause of a real duplication.
+    const { rows: existingUnits } = await sql`
+      SELECT id, name, sort_order FROM units
+      WHERE LOWER(TRIM(school)) = LOWER(${school}) AND LOWER(TRIM(grade)) = LOWER(${grade}) AND LOWER(TRIM(subject)) = LOWER(${subject})
+    `;
     const existingByNumber = new Map<number, any>();
     const existingByName = new Map<string, any>();
     existingUnits.forEach((r: any) => {

@@ -41,7 +41,7 @@ export async function POST(req: NextRequest) {
                um.priority_standards, um.other_deconstructed_standards, um.supporting_standards,
                um.pre_assessment, um.post_assessment, um.common_assessment, um.curriculum_rows, um.start_date, um.end_date
         FROM units u LEFT JOIN unit_maps um ON um.unit_id = u.id
-        WHERE u.id = ${unitId} AND u.school = ${school} AND u.grade = ${grade} AND u.subject = ${subject}
+        WHERE u.id = ${unitId} AND LOWER(TRIM(u.school)) = LOWER(${school}) AND LOWER(TRIM(u.grade)) = LOWER(${grade}) AND LOWER(TRIM(u.subject)) = LOWER(${subject})
       `;
       if (rows.length === 0) {
         return NextResponse.json({ error: `Unit id ${unitId} not found for ${school}/${grade}/${subject}` }, { status: 404 });
@@ -66,7 +66,7 @@ export async function POST(req: NextRequest) {
       // Projection Map import fills them in separately; this at minimum
       // lets the Unit Map itself be reviewed right away, and the app's own
       // Projection Map Completeness check will correctly flag the gap.
-      const { rows: maxOrderRows } = await sql`SELECT COALESCE(MAX(sort_order), -1) + 1 AS next_order FROM units WHERE school = ${school} AND grade = ${grade} AND subject = ${subject}`;
+      const { rows: maxOrderRows } = await sql`SELECT COALESCE(MAX(sort_order), -1) + 1 AS next_order FROM units WHERE LOWER(TRIM(school)) = LOWER(${school}) AND LOWER(TRIM(grade)) = LOWER(${grade}) AND LOWER(TRIM(subject)) = LOWER(${subject})`;
       const nextOrder = maxOrderRows[0]?.next_order ?? 0;
       unitId = `u${slugify(unitName)}${Date.now().toString(36).slice(-5)}`;
       await sql`
