@@ -12,6 +12,16 @@ export async function POST() {
   return runInit();
 }
 
+// Same matching rule used by save-projection-map and the Unit Map import
+// dropdown: number first (robust to name variations across imports),
+// exact name only as a fallback for non-numbered units like "Beginning of
+// school". Returns a string key ("4a") rather than a parsed integer since
+// some documents split units into lettered sub-units (Unit 4a / Unit 4b).
+function extractUnitNumber(name: string): string | null {
+  const m = name.match(/Unit\s+(\d+[a-z]?)\b/i);
+  return m ? m[1].toLowerCase() : null;
+}
+
 async function runInit() {
   try {
     await ensureSchema();
@@ -26,11 +36,38 @@ async function runInit() {
     let unitsInserted = 0, unitMapsInserted = 0;
     for (const [key, mapData] of Object.entries(SEED.maps) as any) {
       const [school, grade, subject] = key.split("|||");
+
+      // Resolve each seed unit to an EXISTING unit id if one already
+      // exists under a different id for the same logical unit - e.g.
+      // created earlier via the live browser import tools, which generate
+      // their own ids independent of whatever the seed uses. Without this,
+      // re-running init after the browser tools have already created real
+      // data silently creates a second, fully duplicate set of units under
+      // new ids - a real, confirmed bug (every ELA-6 unit ended up doubled
+      // this way, with the browser-created copies never linked to any
+      // Unit Map). Matching case-insensitively for the same reason the
+      // units-for-subject and save-projection-map lookups already are.
+      const { rows: existingUnits } = await sql`
+        SELECT id, name FROM units
+        WHERE LOWER(TRIM(school)) = LOWER(${school}) AND LOWER(TRIM(grade)) = LOWER(${grade}) AND LOWER(TRIM(subject)) = LOWER(${subject})
+      `;
+      const existingByNumber = new Map<string, string>();
+      const existingByName = new Map<string, string>();
+      existingUnits.forEach((r: any) => {
+        const num = extractUnitNumber(r.name);
+        if (num !== null) existingByNumber.set(num, r.id);
+        existingByName.set(r.name, r.id);
+      });
+
+      const idMap = new Map<string, string>(); // seed's own id -> resolved (possibly pre-existing) id
       let order = 0;
       for (const unit of mapData.units) {
+        const unitNum = extractUnitNumber(unit.name);
+        const resolvedId = (unitNum !== null ? existingByNumber.get(unitNum) : undefined) || existingByName.get(unit.name) || unit.id;
+        idMap.set(unit.id, resolvedId);
         await sql`
           INSERT INTO units (id, school, grade, subject, name, days, dates, cells, sort_order)
-          VALUES (${unit.id}, ${school}, ${grade}, ${subject}, ${unit.name}, ${unit.days}, ${unit.dates}, ${JSON.stringify(unit.cells)}, ${order})
+          VALUES (${resolvedId}, ${school}, ${grade}, ${subject}, ${unit.name}, ${unit.days}, ${unit.dates}, ${JSON.stringify(unit.cells)}, ${order})
           ON CONFLICT (id) DO UPDATE SET school=EXCLUDED.school, grade=EXCLUDED.grade, subject=EXCLUDED.subject,
             name=EXCLUDED.name, days=EXCLUDED.days, dates=EXCLUDED.dates, cells=EXCLUDED.cells, sort_order=EXCLUDED.sort_order
         `;
@@ -38,9 +75,10 @@ async function runInit() {
         order++;
       }
       for (const [unitId, um] of Object.entries(mapData.unitMaps) as any) {
+        const resolvedUnitId = idMap.get(unitId) || unitId;
         await sql`
           INSERT INTO unit_maps (unit_id, priority_standards, other_deconstructed_standards, supporting_standards, pre_assessment, post_assessment, common_assessment, curriculum_rows, start_date, end_date)
-          VALUES (${unitId}, ${JSON.stringify(um.priorityStandards || [])}, ${JSON.stringify(um.otherDeconstructedStandards || [])}, ${JSON.stringify(um.supportingStandards || [])}, ${JSON.stringify(um.preAssessment || {})},
+          VALUES (${resolvedUnitId}, ${JSON.stringify(um.priorityStandards || [])}, ${JSON.stringify(um.otherDeconstructedStandards || [])}, ${JSON.stringify(um.supportingStandards || [])}, ${JSON.stringify(um.preAssessment || {})},
                   ${JSON.stringify(um.postAssessment || {})}, ${JSON.stringify(um.commonAssessment || {})}, ${JSON.stringify(um.curriculumRows || [])}, ${um.startDate || ""}, ${um.endDate || ""})
           ON CONFLICT (unit_id) DO UPDATE SET priority_standards=EXCLUDED.priority_standards, other_deconstructed_standards=EXCLUDED.other_deconstructed_standards, supporting_standards=EXCLUDED.supporting_standards, pre_assessment=EXCLUDED.pre_assessment,
             post_assessment=EXCLUDED.post_assessment, common_assessment=EXCLUDED.common_assessment, curriculum_rows=EXCLUDED.curriculum_rows, start_date=EXCLUDED.start_date, end_date=EXCLUDED.end_date
