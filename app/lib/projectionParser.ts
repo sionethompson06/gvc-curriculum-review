@@ -214,15 +214,52 @@ function extractHtmlCellTextPreservingMarks(cellHtml: string): string {
  * output is simple, predictable markup and this avoids an extra
  * dependency. Cell text keeps <mark> tags intact - callers needing plain
  * text should strip them; buildProjectionMapFromRows uses them directly
- * for per-code priority detection. */
+ * for per-code priority detection.
+ *
+ * Rowspan-aware: a vertically-merged cell (one teacher-authored piece of
+ * content spanning several strand rows for one unit, e.g. a single
+ * standard that applies across Reading/Writing/Speaking/Language for that
+ * unit) is rendered in HTML only once, in its first row, with a rowspan
+ * attribute - every row it spans is missing that <td> ENTIRELY, not left
+ * empty. Reading cells by naive sequential position (as an earlier version
+ * of this function did) silently shifts every later column left by one
+ * for each row the merge spans, misattributing every subsequent unit's
+ * content to the wrong unit and dropping the last column's data off the
+ * end entirely - confirmed against a real document (6th grade ELA) via
+ * python-docx's direct XML read of the same merge. This tracks active
+ * rowspans by column position across rows and re-inserts the carried-over
+ * text at its correct position before consuming each row's real cells,
+ * matching what python-docx's cell.text reports for the same file. */
 export function parseRowsFromHtml(html: string, tableIndex = 0): string[][] {
   const tables = html.match(/<table[\s\S]*?<\/table>/gi) || [];
   if (tables.length <= tableIndex) return [];
   const tableHtml = tables[tableIndex];
   const rowMatches = tableHtml.match(/<tr[\s\S]*?<\/tr>/gi) || [];
+  const activeRowspans = new Map<number, { remaining: number; text: string }>();
   return rowMatches.map((rowHtml) => {
     const cellMatches = rowHtml.match(/<(th|td)[\s\S]*?<\/\1>/gi) || [];
-    return cellMatches.map(extractHtmlCellTextPreservingMarks);
+    const result: string[] = [];
+    let cellIdx = 0;
+    let colIdx = 0;
+    while (cellIdx < cellMatches.length || activeRowspans.has(colIdx)) {
+      const carried = activeRowspans.get(colIdx);
+      if (carried) {
+        result[colIdx] = carried.text;
+        carried.remaining--;
+        if (carried.remaining <= 0) activeRowspans.delete(colIdx);
+        colIdx++;
+        continue;
+      }
+      const cellHtml = cellMatches[cellIdx];
+      const text = extractHtmlCellTextPreservingMarks(cellHtml);
+      const rowspanMatch = cellHtml.match(/rowspan=["'](\d+)["']/i);
+      const rowspan = rowspanMatch ? parseInt(rowspanMatch[1], 10) : 1;
+      result[colIdx] = text;
+      if (rowspan > 1) activeRowspans.set(colIdx, { remaining: rowspan - 1, text });
+      cellIdx++;
+      colIdx++;
+    }
+    return result;
   });
 }
 
