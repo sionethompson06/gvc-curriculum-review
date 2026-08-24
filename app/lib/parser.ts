@@ -66,6 +66,7 @@ export function extractCodes(text: string): string[] {
     /(?<![A-Z])ELD\.[A-Z]{1,3}\.\d{1,2}\.\d{1,2}/g, // ELD.PI.8.1
     /(?<![A-Z])MP\.\d{1,2}/g, // MP.1
     /(?<![A-Z])[A-Z]{1,2}-[A-Z]{2,4}\d-\d{1,2}(?!\d)/g, // MS-LS1-1, MS-ETS1-4 (NGSS-style; both boundaries use lookarounds - not \b - since these are sometimes glued directly to surrounding words with no space)
+    /(?<![A-Z])HSS-\d{1,2}\.\d{1,2}(?:\.\d{1,2})?(?!\d)/g, // HSS-7.1, HSS-6.2.4 (official CA Dept of Education History-Social Science standard identifier format)
     /(?<![A-Z])[A-Z]{1,2}\.\d{1,2}\.\d{1,2}(?!\d)/g, // RL.6.1, W.6.2, SL.6.1 (ELA-style; letters-first, the reverse order from CCSS Math's grade-first "6.RP.1" - must be checked before the bare-digit pattern below or "RL.6.1" gets silently stripped down to just "6.1")
     /(?<!\d)\d{1,2}\.\d{1,2}(?:\.\d{1,2})?(?!\d)/g, // 6.1, 6.1.2 (bare, e.g. History)
   ];

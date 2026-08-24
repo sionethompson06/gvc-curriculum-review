@@ -83,18 +83,20 @@ function buildProjectionMapFromRows(rows: string[][], hasHighlightData = false):
   if (rows.length < 2) return { units: [], strandNames: [] };
 
   // Row 0: header row - first cell is a grade/title label (skipped), the
-  // rest are unit names, often with an embedded day count (e.g. "Unit 1 28
-  // days" or "Unit 1 ~ 15 days").
+  // rest are unit names, often with an embedded day count in one of a few
+  // observed conventions: "Unit 1 28 days", "Unit 1 ~ 15 days", or
+  // "Unit 1 # Days 25" (a literal "#" placeholder the teacher filled in
+  // after rather than replacing).
   const headerRow = rows[0];
   const unitNames: string[] = [];
   const unitDays: string[] = [];
   for (let i = 1; i < headerRow.length; i++) {
     const cell = cleanCellText(headerRow[i]);
-    const dayMatch = cell.match(/(\d+)\s*days?\b/i);
-    const days = dayMatch ? dayMatch[1] : "";
+    const dayMatch = cell.match(/#?\s*days?\s*[:\-]?\s*(\d+)|(\d+)\s*days?\b/i);
+    const days = dayMatch ? (dayMatch[1] || dayMatch[2]) : "";
     const name = dayMatch ? cell.slice(0, dayMatch.index).replace(/[~\s]+$/, "").trim() : cell.trim();
     unitNames.push(name || `Unit ${i}`);
-    unitDays.push(days);
+    unitDays.push(days || "");
   }
 
   // Row 1: dates row - first cell is a label like "'26-'27 Dates" (skipped).
@@ -105,19 +107,34 @@ function buildProjectionMapFromRows(rows: string[][], hasHighlightData = false):
     name, days: unitDays[i] || "", dates: unitDates[i] || "", cells: {},
   }));
 
-  const strandNames: string[] = [];
+  // Group rows into per-strand blocks. Most documents put one strand per
+  // row, but some (e.g. 7th grade History) spread a single strand's content
+  // across several consecutive rows - a main standard statement, then a
+  // "Standard Description" label row, then sub-standards, then a
+  // "Standard Identifier: HSS-7.1..." metadata row - all with an empty
+  // label cell. Only a genuinely new, non-empty label starts a new group;
+  // everything else accumulates into the current one, so downstream code
+  // extraction sees the full combined text regardless of how many rows the
+  // source document happened to spread it across.
+  type StrandGroup = { label: string; rows: string[][] };
+  const groups: StrandGroup[] = [];
   for (let r = 2; r < rows.length; r++) {
     const row = rows[r];
     const rawLabel = (row[0] || "").replace(/<\/?mark>/gi, "");
-    if (!rawLabel.trim() || STOP_PATTERNS.some((p) => p.test(rawLabel.trim()))) {
-      // A row with every cell empty (sometimes present at the end of the
-      // real table before the legend) isn't a stop condition by itself -
-      // only an empty or legend-matching LABEL cell is.
-      if (!rawLabel.trim() && row.some((c) => c.replace(/<\/?mark>/gi, "").trim())) continue;
-      break;
+    const cleanLabel = cleanCellText(rawLabel);
+    const rowHasAnyContent = row.some((c) => c.replace(/<\/?mark>/gi, "").trim());
+    if (!cleanLabel) {
+      if (!rowHasAnyContent) break; // fully empty row - end of the real table
+      if (groups.length > 0) groups[groups.length - 1].rows.push(row);
+      continue;
     }
-    const strandName = cleanCellText(rawLabel);
-    if (!strandName) continue;
+    if (STOP_PATTERNS.some((p) => p.test(cleanLabel))) break;
+    groups.push({ label: cleanLabel, rows: [row] });
+  }
+
+  const strandNames: string[] = [];
+  for (const group of groups) {
+    const strandName = group.label;
     strandNames.push(strandName);
 
     const lowerStrand = strandName.toLowerCase();
@@ -127,8 +144,8 @@ function buildProjectionMapFromRows(rows: string[][], hasHighlightData = false):
     // "priority" or an unlabeled theme row (e.g. Math) both default to true.
 
     for (let i = 0; i < units.length; i++) {
-      const rawCell = row[i + 1] || "";
-      const entries = buildEntriesForCell(rawCell, hasHighlightData, defaultPriority);
+      const combinedCell = group.rows.map((row) => row[i + 1] || "").filter((c) => c.trim()).join(" ");
+      const entries = buildEntriesForCell(combinedCell, hasHighlightData, defaultPriority);
       if (entries.length === 0) continue;
       (units[i].cells[strandName] ||= []).push(...entries);
     }

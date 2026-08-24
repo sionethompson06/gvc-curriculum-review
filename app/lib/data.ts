@@ -134,7 +134,7 @@ export async function getNotesForUnit(unitId: string) {
 // --- Standard code normalization for alignment checking (pure functions, no DB) ---
 function extractStandardTokens(text: string): string[] {
   if (!text) return [];
-  const t = text.replace(/CCSS\.ELA-LITERACY\./gi, "").replace(/CCSS\.MATH\.CONTENT\./gi, "");
+  const t = text.replace(/CCSS\.ELA-LITERACY\./gi, "").replace(/CCSS\.MATH\.CONTENT\./gi, "").replace(/(?<![A-Z])HSS-/g, "");
   const tokens: string[] = [];
   // Letter-prefix codes (RH, WH, ELD.PI, MP, RP, NS, EE, SP, G, etc.) are always
   // uppercase in every real source document seen so far. Restricting to [A-Z]
@@ -145,7 +145,12 @@ function extractStandardTokens(text: string): string[] {
   const re1 = /\b([A-Z]{1,6}\.\d+(?:\.\d+){0,2}(?:-\d+)?)\b/g;
   let m;
   while ((m = re1.exec(t))) tokens.push(m[1]);
-  const re2 = /\b(\d+\.\d+(?:-\d+)?)\b/g;
+  // Bare-digit codes (History's "6.1.1" style) - matches re1's structure
+  // (up to two additional dot-digit groups) so a 3-part code like "6.1.1"
+  // isn't silently truncated to its 2-part parent "6.1", which would make
+  // sibling sub-standards indistinguishable from each other in alignment
+  // checks that depend on comparing exact codes.
+  const re2 = /\b(\d+\.\d+(?:\.\d+)?(?:-\d+)?)\b/g;
   while ((m = re2.exec(t))) if (!tokens.includes(m[1])) tokens.push(m[1]);
   const re3 = /\b([A-Za-z0-9]+-[A-Za-z]{1,4}\d+-\d+)\b/g;
   while ((m = re3.exec(t))) if (!tokens.includes(m[1])) tokens.push(m[1]);
