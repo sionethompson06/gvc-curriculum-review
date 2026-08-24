@@ -15,7 +15,7 @@
 // parseProjectionMapRawText is kept only as an illustration of the
 // original (broken) approach and is not used by the import UI.
 
-import { parseRows, cleanMarkdownLinks, unescapeMarkdown } from "./parser";
+import { parseRows, cleanMarkdownLinks, unescapeMarkdown, extractCodes, extractCellTextPreservingMarks, extractHighlightedText } from "./parser";
 import type { StandardEntry } from "./types";
 
 export interface ParsedProjectionUnit {
@@ -41,7 +41,45 @@ const STOP_PATTERNS = [
   /^Standard\s*$/i,
 ];
 
-function buildProjectionMapFromRows(rows: string[][]): ParsedProjectionMap {
+/** Builds one or more StandardEntry objects for a single cell. When real
+ * highlight data is available (hasHighlightData=true - i.e. this document
+ * was uploaded as .docx, not pasted as plain text), each recognizable code
+ * in the cell gets its OWN entry with priority based on whether that
+ * specific code is actually highlighted - a cell can genuinely mix
+ * priority and supporting standards together (e.g. Math's "Ratio &
+ * Introductory Number System" cell highlights only "6.RP.1-3", leaving
+ * "6.NS.1-3" and "6.EE1-2" in the same cell unhighlighted/supporting).
+ * Falls back to one whole-cell entry using the strand-name default when
+ * there's no highlight data to go on, or the cell has no recognizable
+ * codes to split by (e.g. plain prose like "Routines"). */
+function buildEntriesForCell(cellTextWithMarks: string, hasHighlightData: boolean, defaultPriority: boolean): StandardEntry[] {
+  const plainText = cellTextWithMarks.replace(/<\/?mark>/gi, "");
+  if (!plainText.trim()) return [];
+
+  if (hasHighlightData) {
+    const codes = extractCodes(plainText);
+    if (codes.length > 0) {
+      const highlightedText = extractHighlightedText(cellTextWithMarks);
+      return codes.map((code) => ({
+        code,
+        desc: plainText,
+        priority: highlightedText.includes(code),
+        needsSupplement: plainText.includes("*"),
+        partial: false,
+      }));
+    }
+  }
+
+  return [{
+    code: "",
+    desc: plainText,
+    priority: defaultPriority,
+    needsSupplement: plainText.includes("*"),
+    partial: false,
+  }];
+}
+
+function buildProjectionMapFromRows(rows: string[][], hasHighlightData = false): ParsedProjectionMap {
   if (rows.length < 2) return { units: [], strandNames: [] };
 
   // Row 0: header row - first cell is a grade/title label (skipped), the
@@ -70,12 +108,12 @@ function buildProjectionMapFromRows(rows: string[][]): ParsedProjectionMap {
   const strandNames: string[] = [];
   for (let r = 2; r < rows.length; r++) {
     const row = rows[r];
-    const rawLabel = row[0] || "";
+    const rawLabel = (row[0] || "").replace(/<\/?mark>/gi, "");
     if (!rawLabel.trim() || STOP_PATTERNS.some((p) => p.test(rawLabel.trim()))) {
       // A row with every cell empty (sometimes present at the end of the
       // real table before the legend) isn't a stop condition by itself -
       // only an empty or legend-matching LABEL cell is.
-      if (!rawLabel.trim() && row.some((c) => c.trim())) continue;
+      if (!rawLabel.trim() && row.some((c) => c.replace(/<\/?mark>/gi, "").trim())) continue;
       break;
     }
     const strandName = cleanCellText(rawLabel);
@@ -85,20 +123,14 @@ function buildProjectionMapFromRows(rows: string[][]): ParsedProjectionMap {
     const lowerStrand = strandName.toLowerCase();
     let defaultPriority = true;
     if (lowerStrand.includes("supporting")) defaultPriority = false;
-    // "priority" or an unlabeled theme row (e.g. Math) both default to true -
-    // the review step is what actually confirms this either way.
+    // Used only as a fallback when there's no highlight data to check -
+    // "priority" or an unlabeled theme row (e.g. Math) both default to true.
 
     for (let i = 0; i < units.length; i++) {
-      const cellText = cleanCellText(row[i + 1] || "");
-      if (!cellText) continue;
-      const entry: StandardEntry = {
-        code: "",
-        desc: cellText,
-        priority: defaultPriority,
-        needsSupplement: cellText.includes("*"),
-        partial: false,
-      };
-      (units[i].cells[strandName] ||= []).push(entry);
+      const rawCell = row[i + 1] || "";
+      const entries = buildEntriesForCell(rawCell, hasHighlightData, defaultPriority);
+      if (entries.length === 0) continue;
+      (units[i].cells[strandName] ||= []).push(...entries);
     }
   }
 
@@ -108,28 +140,23 @@ function buildProjectionMapFromRows(rows: string[][]): ParsedProjectionMap {
 /** @deprecated kept only to document the original, unreliable approach - see
  * the module-level comment above. Use parseProjectionMapFromHtml instead. */
 export function parseProjectionMapRawText(rawText: string): ParsedProjectionMap {
-  return buildProjectionMapFromRows(parseRows(rawText));
+  return buildProjectionMapFromRows(parseRows(rawText), false);
 }
 
-function extractHtmlCellText(cellHtml: string): string {
-  let text = cellHtml.replace(/^<(th|td)[^>]*>/i, "").replace(/<\/(th|td)>$/i, "");
-  // Paragraph boundaries within a cell represent separate lines of content
-  // in the source doc - keep them separated by a space rather than letting
-  // them run together once tags are stripped.
-  text = text.replace(/<\/p>\s*<p[^>]*>/gi, " ");
-  text = text.replace(/<[^>]+>/g, "");
-  text = text
-    .replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">")
-    .replace(/&#39;/g, "'").replace(/&quot;/g, '"')
-    .replace(/&rsquo;/g, "\u2019").replace(/&lsquo;/g, "\u2018").replace(/&nbsp;/g, " ");
-  return text.replace(/\s+/g, " ").trim();
+function extractHtmlCellTextPreservingMarks(cellHtml: string): string {
+  return extractCellTextPreservingMarks(cellHtml)
+    .replace(/&rsquo;/g, "\u2019").replace(/&lsquo;/g, "\u2018");
 }
 
 /** Parses the HTML produced by mammoth's docx-to-HTML conversion (see
  * app/admin/import-projection - the browser reads the uploaded .docx as an
- * ArrayBuffer and calls mammoth.convertToHtml client-side). Regex-based
- * rather than a full DOM parser since mammoth's table output is simple,
- * predictable markup and this avoids an extra dependency. */
+ * ArrayBuffer and calls mammoth.convertToHtml client-side with a
+ * "highlight => mark" style map, so highlighted text survives as <mark>
+ * tags). Regex-based rather than a full DOM parser since mammoth's table
+ * output is simple, predictable markup and this avoids an extra
+ * dependency. Cell text keeps <mark> tags intact - callers needing plain
+ * text should strip them; buildProjectionMapFromRows uses them directly
+ * for per-code priority detection. */
 export function parseRowsFromHtml(html: string, tableIndex = 0): string[][] {
   const tables = html.match(/<table[\s\S]*?<\/table>/gi) || [];
   if (tables.length <= tableIndex) return [];
@@ -137,11 +164,13 @@ export function parseRowsFromHtml(html: string, tableIndex = 0): string[][] {
   const rowMatches = tableHtml.match(/<tr[\s\S]*?<\/tr>/gi) || [];
   return rowMatches.map((rowHtml) => {
     const cellMatches = rowHtml.match(/<(th|td)[\s\S]*?<\/\1>/gi) || [];
-    return cellMatches.map(extractHtmlCellText);
+    return cellMatches.map(extractHtmlCellTextPreservingMarks);
   });
 }
 
 export function parseProjectionMapFromHtml(html: string, tableIndex = 0): ParsedProjectionMap {
-  return buildProjectionMapFromRows(parseRowsFromHtml(html, tableIndex));
+  const rows = parseRowsFromHtml(html, tableIndex);
+  const hasHighlightData = rows.some((row) => row.some((cell) => /<mark>/i.test(cell)));
+  return buildProjectionMapFromRows(rows, hasHighlightData);
 }
 

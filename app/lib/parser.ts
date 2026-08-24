@@ -66,6 +66,7 @@ export function extractCodes(text: string): string[] {
     /(?<![A-Z])ELD\.[A-Z]{1,3}\.\d{1,2}\.\d{1,2}/g, // ELD.PI.8.1
     /(?<![A-Z])MP\.\d{1,2}/g, // MP.1
     /(?<![A-Z])[A-Z]{1,2}-[A-Z]{2,4}\d-\d{1,2}(?!\d)/g, // MS-LS1-1, MS-ETS1-4 (NGSS-style; both boundaries use lookarounds - not \b - since these are sometimes glued directly to surrounding words with no space)
+    /(?<![A-Z])[A-Z]{1,2}\.\d{1,2}\.\d{1,2}(?!\d)/g, // RL.6.1, W.6.2, SL.6.1 (ELA-style; letters-first, the reverse order from CCSS Math's grade-first "6.RP.1" - must be checked before the bare-digit pattern below or "RL.6.1" gets silently stripped down to just "6.1")
     /(?<!\d)\d{1,2}\.\d{1,2}(?:\.\d{1,2})?(?!\d)/g, // 6.1, 6.1.2 (bare, e.g. History)
   ];
   const allMatches: { start: number; end: number; code: string }[] = [];
@@ -258,14 +259,32 @@ export function parseUnitMapRawText(rawText: string): ParsedUnitMap {
   let nounsMap: Record<string, string> = {};
   let verbsMap: Record<string, string> = {};
   idx = findRowIndex(rows, "List the nouns");
-  if (idx >= 0 && rows[idx].length > 1) {
+  if (idx >= 0 && rows[idx].length > 1 && rows[idx][1].trim()) {
     const text = rows[idx][1];
     nounsMap = splitByCodes(text, extractCodes(text));
   }
+  if (Object.keys(nounsMap).length === 0) {
+    // "List the nouns..." is sometimes left blank by a teacher who instead
+    // put the noun list directly into "Define nouns as needed..." (mixing
+    // the noun and its definition together in one cell) - fall back there
+    // rather than losing this real work entirely.
+    idx = findRowIndex(rows, "Define nouns as needed");
+    if (idx >= 0 && rows[idx].length > 1 && rows[idx][1].trim()) {
+      const text = rows[idx][1];
+      nounsMap = splitByCodes(text, extractCodes(text));
+    }
+  }
   idx = findRowIndex(rows, "List the verbs");
-  if (idx >= 0 && rows[idx].length > 1) {
+  if (idx >= 0 && rows[idx].length > 1 && rows[idx][1].trim()) {
     const text = rows[idx][1];
     verbsMap = splitByCodes(text, extractCodes(text));
+  }
+  if (Object.keys(verbsMap).length === 0) {
+    idx = findRowIndex(rows, "Define verb as needed");
+    if (idx >= 0 && rows[idx].length > 1 && rows[idx][1].trim()) {
+      const text = rows[idx][1];
+      verbsMap = splitByCodes(text, extractCodes(text));
+    }
   }
 
   // Identify Learning Targets - two known formats:
@@ -343,22 +362,36 @@ export function parseUnitMapRawText(rawText: string): ParsedUnitMap {
   // STANDARD(S) - e.g. a standard the teacher listed under Supporting
   // Standards but still deconstructed anyway. Captured separately so this
   // real work isn't lost, without blurring the "chosen priority" scope of
-  // priorityStandards itself. "type" is left blank since "Mark the standard
-  // type/s" is scoped to the chosen priority standards in the template
-  // itself - it's genuinely never marked for these.
+  // priorityStandards itself.
   const allDeconstructedCodes = new Set<string>([
     ...Object.keys(nounsMap), ...Object.keys(verbsMap),
     ...Object.keys(knowledgeMap), ...Object.keys(reasoningMap), ...Object.keys(perfMap), ...Object.keys(productMap),
   ]);
   const chosenSet = new Set(result.chosenPriorityCodes);
+  const otherCodesList = [...allDeconstructedCodes].filter((c) => !chosenSet.has(c));
+
+  // "Mark the standard type/s" is scoped to CHOOSE PRIORITY STANDARD(S) in
+  // the template's own design, so type is usually genuinely never marked
+  // for standards outside that list - EXCEPT when CHOOSE PRIORITY
+  // STANDARD(S) itself was left blank (a real, separate completeness gap)
+  // while the type-marking row still references real codes anyway. Check
+  // for that case specifically so this real teacher work isn't silently
+  // dropped just because the priority-selection step wasn't filled in.
+  let otherTypeMap: Record<string, string[]> = {};
+  const typeRowIdx = findRowIndex(rows, "Mark the standard type");
+  if (typeRowIdx >= 0 && otherCodesList.length > 0) {
+    otherTypeMap = parseTypeMarkingRow(rows[typeRowIdx], otherCodesList);
+  }
+
   const otherDeconstructedStandards: PriorityStandardDeconstruction[] = [];
   for (const code of allDeconstructedCodes) {
     if (chosenSet.has(code)) continue;
     const hasContent = !!(nounsMap[code] || verbsMap[code] || knowledgeMap[code] || reasoningMap[code] || perfMap[code] || productMap[code]);
     if (!hasContent) continue;
+    const types = otherTypeMap[code] || [];
     otherDeconstructedStandards.push({
       code,
-      type: "",
+      type: types.join(", "),
       nouns: nounsMap[code] || "",
       verbs: verbsMap[code] || "",
       targets: {
@@ -481,7 +514,7 @@ export function htmlToUnitMapPipeText(html: string): string {
 // the source document encodes - confirmed against python-docx's direct
 // XML read of the same file, both agreeing exactly.
 
-function extractCellTextPreservingMarks(cellHtml: string): string {
+export function extractCellTextPreservingMarks(cellHtml: string): string {
   let text = cellHtml.replace(/^<(th|td)[^>]*>/i, "").replace(/<\/(th|td)>$/i, "");
   text = text.replace(/<\/p>\s*<p[^>]*>/gi, " ");
   text = text.replace(/<(?!\/?mark\b)[^>]+>/gi, "");
@@ -491,7 +524,7 @@ function extractCellTextPreservingMarks(cellHtml: string): string {
   return text.replace(/\s+/g, " ").trim();
 }
 
-function extractHighlightedText(cellTextWithMarks: string): string {
+export function extractHighlightedText(cellTextWithMarks: string): string {
   const marks = [...cellTextWithMarks.matchAll(/<mark>([\s\S]*?)<\/mark>/gi)];
   return marks.map((m) => m[1]).join("");
 }
