@@ -6,6 +6,17 @@ function slugify(name: string): string {
   return name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
 }
 
+// A unit's name can legitimately change between two imports of the "same"
+// unit - most commonly because a parser fix changes how the name gets
+// extracted (e.g. "Unit 1 # Days 25" becoming the cleaner "Unit 1"). Matching
+// on the number extracted from the name is robust to that; matching on the
+// exact string is not, and silently creates a duplicate instead of updating
+// the existing unit - exactly the failure mode this is fixing.
+function extractUnitNumber(name: string): number | null {
+  const m = name.match(/Unit\s+(\d+)/i);
+  return m ? parseInt(m[1], 10) : null;
+}
+
 export async function POST(req: NextRequest) {
   try {
     await ensureSchema();
@@ -20,19 +31,28 @@ export async function POST(req: NextRequest) {
       ON CONFLICT (name) DO UPDATE SET strands = EXCLUDED.strands
     `;
 
-    // Match by unit name within this school/grade/subject - update if a unit
-    // with that name already exists (preserving its id, and therefore any
-    // Unit Map already linked to it), otherwise create a new one.
+    // Match by unit number first (robust across name changes between
+    // imports - see extractUnitNumber above), falling back to exact name
+    // match only for units with no number in their name (e.g. "Beginning
+    // of school"). Preserves the existing id either way, and therefore any
+    // Unit Map already linked to it.
     const { rows: existingUnits } = await sql`SELECT id, name, sort_order FROM units WHERE school = ${school} AND grade = ${grade} AND subject = ${subject}`;
-    const existingByName = new Map(existingUnits.map((r: any) => [r.name, r]));
+    const existingByNumber = new Map<number, any>();
+    const existingByName = new Map<string, any>();
+    existingUnits.forEach((r: any) => {
+      const num = extractUnitNumber(r.name);
+      if (num !== null) existingByNumber.set(num, r);
+      existingByName.set(r.name, r);
+    });
     let nextOrder = existingUnits.reduce((max: number, r: any) => Math.max(max, r.sort_order || 0), -1) + 1;
 
     let created = 0, updated = 0;
     for (const unit of units) {
-      const existing = existingByName.get(unit.name);
+      const unitNum = extractUnitNumber(unit.name);
+      const existing = (unitNum !== null ? existingByNumber.get(unitNum) : undefined) || existingByName.get(unit.name);
       if (existing) {
         await sql`
-          UPDATE units SET days = ${unit.days || ""}, dates = ${unit.dates || ""}, cells = ${JSON.stringify(unit.cells || {})}
+          UPDATE units SET name = ${unit.name}, days = ${unit.days || ""}, dates = ${unit.dates || ""}, cells = ${JSON.stringify(unit.cells || {})}
           WHERE id = ${existing.id}
         `;
         updated++;
