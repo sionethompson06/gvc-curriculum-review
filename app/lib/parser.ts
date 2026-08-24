@@ -431,8 +431,25 @@ export function parseUnitMapRawText(rawText: string): ParsedUnitMap {
  * lossy plain-text export - see the module-level comment for why that
  * matters (silently shifted/compressed empty cells, no highlight info). */
 export function htmlToUnitMapPipeText(html: string): string {
-  const tables = html.match(/<table[\s\S]*?<\/table>/gi) || [];
-  const tableBlocks = tables.map((tableHtml) => {
+  // Walk the HTML in document order, alternating between table blocks
+  // (converted to pipe-delimited text) and whatever text sits between them -
+  // crucially including standalone "Unit N ... (Grade N)" delimiter lines,
+  // which is what splitIntoUnitChunks uses to detect unit boundaries in a
+  // document that bundles multiple units into one file. Extracting only
+  // <table> content (the original version of this function) silently drops
+  // those lines entirely, causing a 3-unit document to be misread as one
+  // giant unit - caught by testing against History's real 3-unit file.
+  const segments: string[] = [];
+  let lastIndex = 0;
+  const tableRegex = /<table[\s\S]*?<\/table>/gi;
+  let match: RegExpExecArray | null;
+  while ((match = tableRegex.exec(html)) !== null) {
+    const between = html.slice(lastIndex, match.index);
+    const betweenText = between.replace(/<[^>]+>/g, "\n").replace(/&amp;/g, "&").replace(/&nbsp;/g, " ");
+    const unitLineMatch = betweenText.match(/^\s*Unit\s+\d+[^\n]*\(Grade\s+\d+\)\s*$/m);
+    if (unitLineMatch) segments.push(unitLineMatch[0].trim());
+
+    const tableHtml = match[0];
     const rowMatches = tableHtml.match(/<tr[\s\S]*?<\/tr>/gi) || [];
     const lines = rowMatches.map((rowHtml) => {
       const cellMatches = rowHtml.match(/<(th|td)[\s\S]*?<\/\1>/gi) || [];
@@ -447,9 +464,10 @@ export function htmlToUnitMapPipeText(html: string): string {
       });
       return "| " + cells.join(" | ") + " |";
     });
-    return lines.join("\n");
-  });
-  return tableBlocks.join("\n\n");
+    segments.push(lines.join("\n"));
+    lastIndex = match.index + tableHtml.length;
+  }
+  return segments.join("\n\n");
 }
 // The plain-text export this parser otherwise runs on has no way to know
 // which codes were actually highlighted in that row - parseTypeMarkingRow
