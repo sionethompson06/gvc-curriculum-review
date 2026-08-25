@@ -61,9 +61,9 @@ export function parseRows(rawText: string): string[][] {
  * preceding character is a letter glued directly against a leading digit. */
 export function extractCodes(text: string): string[] {
   const t = cleanMarkdownLinks(text);
-  const patterns: { re: RegExp; normalize?: (raw: string) => string }[] = [
+  const patterns: { re: RegExp; normalize?: (raw: string) => string; isBareDigit?: boolean }[] = [
     { re: /(?<!\d)\d{1,2}\.[A-Z]{1,4}\.\d{1,2}(?:\.\d{1,2})?/g }, // 6.RP.1, 6.NS.3
-    { re: /(?<!\d)\d{1,2}\.[A-Z]{1,4}\.[A-Z]\.\d{1,2}(?:\.\d{1,2})?/g }, // 5.NBT.A.1, 5.MD.C.3 (official CCSS Math format with a cluster letter between domain and standard number - coexists with the shorter 3-part form for the same standard within the same document)
+    { re: /(?<!\d)\d{1,2}\.[A-Z]{1,4}\.\s?[A-Z]\.\d{1,2}(?:\.\d{1,2})?/g, normalize: (raw: string) => raw.replace(/\s+/g, "") }, // 5.NBT.A.1, 5.MD.C.3 (official CCSS Math format with a cluster letter between domain and standard number - coexists with the shorter 3-part form for the same standard within the same document; tolerates an occasional space before the cluster letter, e.g. "5.NBT. B.7", seen where a source cell's paragraph break gets joined with a space)
     { re: /(?<![A-Z])ELD\.[A-Z]{1,3}\.\d{1,2}\.\d{1,2}/g }, // ELD.PI.8.1
     { re: /(?<![A-Z])MP\.\d{1,2}/g }, // MP.1
     { re: /(?<![A-Z])[A-Z]{1,2}-[A-Z]{2,4}\d-\d{1,2}(?!\d)/g }, // MS-LS1-1, MS-ETS1-4 (NGSS-style; both boundaries use lookarounds - not \b - since these are sometimes glued directly to surrounding words with no space)
@@ -79,20 +79,33 @@ export function extractCodes(text: string): string[] {
     // dot form so both spellings resolve to the same code everywhere else
     // in the app (alignment checks, type-marking, priority detection).
     { re: /(?<![A-Z])[A-Z]{1,2}-\d{1,2}\.\d{1,2}(?:\.\d{1,2})?(?!\d)/g, normalize: (raw) => raw.replace("-", ".") },
-    { re: /(?<!\d)\d{1,2}\.\d{1,2}(?:\.\d{1,2})?(?!\d)/g }, // 6.1, 6.1.2 (bare, e.g. History)
+    { re: /(?<!\d)\d{1,2}\.\d{1,2}(?:\.\d{1,2})?(?!\d)/g, isBareDigit: true }, // 6.1, 6.1.2 (bare, e.g. History)
   ];
-  const allMatches: { start: number; end: number; code: string }[] = [];
-  for (const { re, normalize } of patterns) {
+  const allMatches: { start: number; end: number; code: string; isBareDigit?: boolean }[] = [];
+  for (const { re, normalize, isBareDigit } of patterns) {
     for (const m of t.matchAll(re)) {
-      allMatches.push({ start: m.index!, end: m.index! + m[0].length, code: normalize ? normalize(m[0]) : m[0] });
+      allMatches.push({ start: m.index!, end: m.index! + m[0].length, code: normalize ? normalize(m[0]) : m[0], isBareDigit });
     }
   }
+  // A bare-digit match that has a MORE SPECIFIC match starting partway
+  // through its own span is dropped before the main overlap resolution
+  // below runs - a real bug otherwise: source text with no space between
+  // sentences ("...powers of 10.5.NBT.3 Read...") makes the bare-digit
+  // pattern greedily match "10.5" (starting one character earlier than
+  // the real "5.NBT.3"), which then blocks the real, far more specific
+  // match under the plain "earliest start wins" rule below - silently
+  // dropping a real chosen priority standard from the parsed result.
+  const specificMatches = allMatches.filter((m) => !m.isBareDigit);
+  const filteredMatches = allMatches.filter((m) => {
+    if (!m.isBareDigit) return true;
+    return !specificMatches.some((s) => s.start > m.start && s.start < m.end);
+  });
   // Resolve overlaps: prefer longer matches; sort by start asc, length desc,
   // then greedily accept matches that don't fall inside an already-accepted span.
-  allMatches.sort((a, b) => a.start - b.start || (b.end - b.start) - (a.end - a.start));
+  filteredMatches.sort((a, b) => a.start - b.start || (b.end - b.start) - (a.end - a.start));
   const accepted: string[] = [];
   let lastEnd = -1;
-  for (const { start, end, code } of allMatches) {
+  for (const { start, end, code } of filteredMatches) {
     if (start >= lastEnd) {
       accepted.push(code);
       lastEnd = end;
@@ -475,17 +488,23 @@ export function parseUnitMapRawText(rawText: string): ParsedUnitMap {
     const curriculumRows: CurriculumRow[] = [];
     while (i < rows.length) {
       const row = rows[i];
-      if (!row || !row[0]?.trim()) {
+      // A row is skipped only if EVERY column is empty - a real document
+      // can genuinely leave the Standards column blank on a curriculum
+      // map row while still filling in real Learning Targets/Assessments/
+      // Strategies content; checking row[0] alone silently discarded that
+      // real work entirely rather than surfacing the blank Standards
+      // column as its own finding.
+      if (!row || !row.some((c) => c?.trim())) {
         i++;
         continue;
       }
-      if (row[0].includes("Determine Pre-Assessment") || row[0].includes("Common Standard Assessment")) break;
+      if (row[0]?.includes("Determine Pre-Assessment") || row[0]?.includes("Common Standard Assessment")) break;
       if (row.length >= 5) {
         curriculumRows.push({
-          standard: row[0],
-          contentVocab: row[1],
-          targetOrder: row[2],
-          assessmentNote: row[3],
+          standard: row[0] || "",
+          contentVocab: row[1] || "",
+          targetOrder: row[2] || "",
+          assessmentNote: row[3] || "",
           strategies: row[4]?.trim() ? [{ name: row[4], type: "curriculum" }] : [],
         });
       }

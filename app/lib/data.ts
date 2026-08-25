@@ -146,9 +146,9 @@ function extractStandardTokens(text: string): string[] {
   // standard number (5.NBT.A.1, 5.MD.C.3) - checked first, since re1 below
   // would otherwise match just the trailing "A.1" and silently lose the
   // "5.NBT." prefix that makes the code meaningful.
-  const re0 = /\b(\d{1,2}\.[A-Z]{1,4}\.[A-Z]\.\d{1,2}(?:\.\d{1,2})?)\b/g;
+  const re0 = /\b(\d{1,2}\.[A-Z]{1,4}\.\s?[A-Z]\.\d{1,2}(?:\.\d{1,2})?)\b/g;
   let m0;
-  while ((m0 = re0.exec(t))) tokens.push(m0[1]);
+  while ((m0 = re0.exec(t))) tokens.push(m0[1].replace(/\s+/g, ""));
   // Letter-prefix codes (RH, WH, ELD.PI, MP, RP, NS, EE, SP, G, etc.) are always
   // uppercase in every real source document seen so far. Restricting to [A-Z]
   // (rather than [A-Za-z]) avoids false positives where an ordinary lowercase
