@@ -60,7 +60,15 @@ const STOP_PATTERNS = [
  * their next revision, rather than the tool silently guessing on their
  * behalf. Cells with no recognizable standard code at all (plain prose
  * like "Introductions") aren't flagged - there's no standard being
- * categorized, so priority doesn't apply. */
+ * categorized, so priority doesn't apply.
+ *
+ * Codes sharing the same priority status are grouped into ONE entry with
+ * all their codes joined together, rather than one entry per code that
+ * would each duplicate the entire cell's text - a real, confirmed display
+ * bug (a single cell mentioning many codes together, e.g. a genuinely
+ * merged cell spanning several standards, produced a dozen separate
+ * entries in the app all showing the identical paragraph, differing only
+ * in which one code each was tagged with). */
 function buildEntriesForCell(cellTextWithMarks: string, hasHighlightData: boolean, strandName: string): StandardEntry[] {
   const plainText = cellTextWithMarks.replace(/<\/?mark>/gi, "");
   if (!plainText.trim()) return [];
@@ -70,28 +78,38 @@ function buildEntriesForCell(cellTextWithMarks: string, hasHighlightData: boolea
     return [{ code: "", desc: plainText, priority: false, needsSupplement: plainText.includes("*"), partial: false }];
   }
 
+  const needsSupplement = plainText.includes("*");
+  const groupByStatus = (statusOf: (code: string) => { priority: boolean; priorityUnclear?: boolean }): StandardEntry[] => {
+    const groups = new Map<string, { codes: string[]; priority: boolean; priorityUnclear?: boolean }>();
+    codes.forEach((code) => {
+      const status = statusOf(code);
+      const key = `${status.priority}|${!!status.priorityUnclear}`;
+      const group = groups.get(key) || { codes: [], priority: status.priority, priorityUnclear: status.priorityUnclear };
+      group.codes.push(code);
+      groups.set(key, group);
+    });
+    return [...groups.values()].map((g) => ({
+      code: g.codes.join(", "), desc: plainText, priority: g.priority,
+      ...(g.priorityUnclear ? { priorityUnclear: true } : {}), needsSupplement, partial: false,
+    }));
+  };
+
   if (hasHighlightData) {
     const highlightedText = extractHighlightedText(cellTextWithMarks);
     if (highlightedText) {
-      return codes.map((code) => ({
-        code, desc: plainText, priority: highlightedText.includes(code),
-        needsSupplement: plainText.includes("*"), partial: false,
-      }));
+      return groupByStatus((code) => ({ priority: highlightedText.includes(code) }));
     }
   }
 
   const lowerStrand = strandName.toLowerCase();
   if (lowerStrand.includes("supporting")) {
-    return codes.map((code) => ({ code, desc: plainText, priority: false, needsSupplement: plainText.includes("*"), partial: false }));
+    return [{ code: codes.join(", "), desc: plainText, priority: false, needsSupplement, partial: false }];
   }
   if (lowerStrand.includes("priority")) {
-    return codes.map((code) => ({ code, desc: plainText, priority: true, needsSupplement: plainText.includes("*"), partial: false }));
+    return [{ code: codes.join(", "), desc: plainText, priority: true, needsSupplement, partial: false }];
   }
 
-  return codes.map((code) => ({
-    code, desc: plainText, priority: false, priorityUnclear: true,
-    needsSupplement: plainText.includes("*"), partial: false,
-  }));
+  return [{ code: codes.join(", "), desc: plainText, priority: false, priorityUnclear: true, needsSupplement, partial: false }];
 }
 
 function buildProjectionMapFromRows(rows: string[][], hasHighlightData = false): ParsedProjectionMap {
