@@ -166,7 +166,11 @@ export function parseTypeMarkingRow(row: string[], knownCodes: string[]): Record
     const category = (row[i + 1] || "").trim();
     if (categoryNames.includes(category)) {
       for (const code of knownCodes) {
-        if (codesBlob.includes(code)) {
+        // Also match with a leading "MS-" stripped - some NGSS-style type-
+        // marking rows write codes without that prefix ("PS2-2" instead of
+        // "MS-PS2-2") even though the rest of the document (List Standards,
+        // CHOOSE PRIORITY STANDARD(S)) uses the full form consistently.
+        if (codesBlob.includes(code) || codesBlob.includes(code.replace(/^MS-/, ""))) {
           (result[code] ||= []).push(category);
         }
       }
@@ -301,11 +305,22 @@ export function parseUnitMapRawText(rawText: string): ParsedUnitMap {
     result.chosenPriorityCodes = extractCodes(chosenText);
   }
 
-  // Mark the standard type/s
+  // Mark the standard type/s - a unit can genuinely have several separate
+  // deconstruction blocks (e.g. a teacher who split standards into
+  // sub-groups within one unit), each with its own type-marking row.
+  // Searching only the first occurrence would leave every standard in a
+  // later block unmatched against any type-marking data at all, even
+  // though the document genuinely marks types for them too - merge across
+  // every occurrence found in this chunk instead.
   let typeMap: Record<string, string[]> = {};
   idx = findRowIndex(rows, "Mark the standard type");
-  if (idx >= 0) {
-    typeMap = parseTypeMarkingRow(rows[idx], result.chosenPriorityCodes);
+  while (idx >= 0) {
+    const partial = parseTypeMarkingRow(rows[idx], result.chosenPriorityCodes);
+    for (const [code, cats] of Object.entries(partial)) {
+      const existing = typeMap[code] || [];
+      typeMap[code] = Array.from(new Set([...existing, ...cats]));
+    }
+    idx = findRowIndex(rows, "Mark the standard type", idx + 1);
   }
 
   // Deconstruct: nouns / verbs
@@ -431,9 +446,16 @@ export function parseUnitMapRawText(rawText: string): ParsedUnitMap {
   // for that case specifically so this real teacher work isn't silently
   // dropped just because the priority-selection step wasn't filled in.
   let otherTypeMap: Record<string, string[]> = {};
-  const typeRowIdx = findRowIndex(rows, "Mark the standard type");
-  if (typeRowIdx >= 0 && otherCodesList.length > 0) {
-    otherTypeMap = parseTypeMarkingRow(rows[typeRowIdx], otherCodesList);
+  if (otherCodesList.length > 0) {
+    let typeRowIdx = findRowIndex(rows, "Mark the standard type");
+    while (typeRowIdx >= 0) {
+      const partial = parseTypeMarkingRow(rows[typeRowIdx], otherCodesList);
+      for (const [code, cats] of Object.entries(partial)) {
+        const existing = otherTypeMap[code] || [];
+        otherTypeMap[code] = Array.from(new Set([...existing, ...cats]));
+      }
+      typeRowIdx = findRowIndex(rows, "Mark the standard type", typeRowIdx + 1);
+    }
   }
 
   const otherDeconstructedStandards: PriorityStandardDeconstruction[] = [];
