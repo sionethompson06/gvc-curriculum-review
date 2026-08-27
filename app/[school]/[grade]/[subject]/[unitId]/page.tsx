@@ -123,8 +123,9 @@ function parseScoringText(text?: string): ScoringBlock[] {
 
 export default async function UnitPage({ params }: { params: { school: string; grade: string; subject: string; unitId: string } }) {
   const school = schoolFromSlug(params.school);
-  const subject = await subjectFromSlug(params.subject);
-  if (!school || !subject) return notFound();
+  if (!school) return notFound();
+  const subject = await subjectFromSlug(school, params.subject);
+  if (!subject) return notFound();
   const grade = decodeURIComponent(params.grade);
   const map = await getMap(school, grade, subject);
   const unit = map?.units.find((u) => u.id === params.unitId);

@@ -26,11 +26,11 @@ export async function POST(req: NextRequest) {
     // confirmed bug (a "History"/"HIstory" split orphaned the real subject
     // from subjectFromSlug's slug-based lookup, breaking the entire
     // subject page and every unit page under it).
-    const { rows: existingSubjectRows } = await sql`SELECT name FROM subjects WHERE LOWER(TRIM(name)) = LOWER(TRIM(${subject}))`;
+    const { rows: existingSubjectRows } = await sql`SELECT name FROM subjects WHERE LOWER(TRIM(school)) = LOWER(TRIM(${school})) AND LOWER(TRIM(name)) = LOWER(TRIM(${subject}))`;
     const resolvedSubject = existingSubjectRows[0]?.name || subject;
     await sql`
-      INSERT INTO subjects (name, strands) VALUES (${resolvedSubject}, '[]')
-      ON CONFLICT (name) DO NOTHING
+      INSERT INTO subjects (school, name, strands) VALUES (${school}, ${resolvedSubject}, '[]')
+      ON CONFLICT (school, name) DO NOTHING
     `;
 
     let unitId = providedUnitId as string | undefined;

@@ -10,7 +10,7 @@ export default function AdminImportProjectionPage() {
   const [parsed, setParsed] = useState<ParsedProjectionMap | null>(null);
   const [status, setStatus] = useState<"idle" | "parsing" | "ready" | "saving" | "saved" | "error">("idle");
   const [error, setError] = useState("");
-  const [saveResult, setSaveResult] = useState<{ created: number; updated: number } | null>(null);
+  const [saveResult, setSaveResult] = useState<{ created: number; updated: number; unitDiffs?: { unitName: string; diff: { resolved: string[]; newlyIntroduced: string[]; stillPresent: string[] } }[] } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   async function handleFile(file: File) {
@@ -67,7 +67,7 @@ export default function AdminImportProjectionPage() {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Save failed");
-      setSaveResult({ created: data.created, updated: data.updated });
+      setSaveResult({ created: data.created, updated: data.updated, unitDiffs: data.unitDiffs || [] });
       setStatus("saved");
     } catch (e: any) {
       setError(e.message || String(e));
@@ -181,6 +181,41 @@ export default function AdminImportProjectionPage() {
             {saveResult && (
               <div className="note-strip" style={{ marginTop: 14 }}>
                 Saved — {saveResult.created} unit{saveResult.created !== 1 ? "s" : ""} created, {saveResult.updated} updated.
+              </div>
+            )}
+            {saveResult && saveResult.unitDiffs && saveResult.unitDiffs.length > 0 && (
+              <div style={{ marginTop: 14 }}>
+                <div style={{ fontSize: 12.5, fontWeight: 700, color: "var(--ink-soft)", marginBottom: 8 }}>
+                  What changed from the previous version, by unit
+                </div>
+                {saveResult.unitDiffs.map((ud, i) => (
+                  <div key={i} className="panel" style={{ marginBottom: 10 }}>
+                    <div className="panel-head"><h3 style={{ fontSize: 13.5 }}>{ud.unitName}</h3></div>
+                    <div className="panel-body">
+                      {ud.diff.resolved.length > 0 && (
+                        <div style={{ marginBottom: ud.diff.newlyIntroduced.length > 0 ? 10 : 0 }}>
+                          <div style={{ fontSize: 11.5, fontWeight: 700, color: "var(--teal)", marginBottom: 4 }}>✓ Resolved ({ud.diff.resolved.length})</div>
+                          <ul style={{ margin: 0, paddingLeft: 18 }}>
+                            {ud.diff.resolved.map((issue, ii) => <li key={ii} style={{ fontSize: 12, marginBottom: 2 }}>{issue}</li>)}
+                          </ul>
+                        </div>
+                      )}
+                      {ud.diff.newlyIntroduced.length > 0 && (
+                        <div>
+                          <div style={{ fontSize: 11.5, fontWeight: 700, color: "var(--rust)", marginBottom: 4 }}>New ({ud.diff.newlyIntroduced.length})</div>
+                          <ul style={{ margin: 0, paddingLeft: 18 }}>
+                            {ud.diff.newlyIntroduced.map((issue, ii) => <li key={ii} style={{ fontSize: 12, marginBottom: 2 }}>{issue}</li>)}
+                          </ul>
+                        </div>
+                      )}
+                      {ud.diff.stillPresent.length > 0 && (
+                        <div style={{ marginTop: 10, fontSize: 12, color: "var(--slate)" }}>
+                          {ud.diff.stillPresent.length} issue{ud.diff.stillPresent.length > 1 ? "s" : ""} still present from before.
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                ))}
               </div>
             )}
             {error && status === "error" && <div style={{ color: "var(--rust)", fontSize: 12.5, marginTop: 8 }}>{error}</div>}

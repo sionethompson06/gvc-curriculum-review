@@ -10,11 +10,12 @@ export const revalidate = 0;
 
 export default async function SubjectPage({ params }: { params: { school: string; grade: string; subject: string } }) {
   const school = schoolFromSlug(params.school);
-  const subject = await subjectFromSlug(params.subject);
-  if (!school || !subject) return notFound();
+  if (!school) return notFound();
+  const subject = await subjectFromSlug(school, params.subject);
+  if (!subject) return notFound();
   const grade = decodeURIComponent(params.grade);
   const map = await getMap(school, grade, subject);
-  const strands = await strandsFor(subject);
+  const strands = await strandsFor(school, subject);
   const projCompleteness = computeProjectionMapCompleteness(map?.units || []);
 
   return (

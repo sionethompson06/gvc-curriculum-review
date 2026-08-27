@@ -28,9 +28,23 @@ export async function ensureSchema() {
   await sql`ALTER TABLE unit_maps ADD COLUMN IF NOT EXISTS common_assessment JSONB NOT NULL DEFAULT '{}'`;
   await sql`ALTER TABLE unit_maps ADD COLUMN IF NOT EXISTS other_deconstructed_standards JSONB NOT NULL DEFAULT '[]'`;
   await sql`CREATE TABLE IF NOT EXISTS subjects (
-    name TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
     strands JSONB NOT NULL DEFAULT '[]'
   )`;
+  // Migrate to school-scoped subjects. The original schema used a bare
+  // "name" primary key, which is a real, serious bug caught in a
+  // pre-scaling review: every school will have a "Math", a "History", an
+  // "ELA" - importing a second school's Projection Map would silently
+  // overwrite the first school's strand labels via the upsert logic,
+  // since there was only ever one global row per subject name. Adds
+  // school scoping via a composite unique index rather than changing the
+  // primary key in place, which is safer to run idempotently on every
+  // request against a database that already has data.
+  await sql`ALTER TABLE subjects ADD COLUMN IF NOT EXISTS school TEXT`;
+  await sql`UPDATE subjects SET school = 'TEACH Academy' WHERE school IS NULL`;
+  await sql`ALTER TABLE subjects ALTER COLUMN school SET NOT NULL`;
+  await sql`ALTER TABLE subjects DROP CONSTRAINT IF EXISTS subjects_pkey`;
+  await sql`CREATE UNIQUE INDEX IF NOT EXISTS subjects_school_name_idx ON subjects (school, name)`;
   await sql`CREATE TABLE IF NOT EXISTS ai_reviews (
     id SERIAL PRIMARY KEY,
     unit_id TEXT REFERENCES units(id) ON DELETE CASCADE,

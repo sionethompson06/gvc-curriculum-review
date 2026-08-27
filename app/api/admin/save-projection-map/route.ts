@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { sql } from "@vercel/postgres";
 import { ensureSchema } from "../../../lib/db";
+import { summarizeIssues, diffIssues } from "../../../lib/data";
 
 function slugify(name: string): string {
   return name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
@@ -48,12 +49,12 @@ export async function POST(req: NextRequest) {
     // matching would then sometimes resolve to that orphaned name instead
     // of the real one, breaking the entire subject page and every unit
     // page under it.
-    const { rows: existingSubjectRows } = await sql`SELECT name FROM subjects WHERE LOWER(TRIM(name)) = LOWER(TRIM(${subject}))`;
+    const { rows: existingSubjectRows } = await sql`SELECT name FROM subjects WHERE LOWER(TRIM(school)) = LOWER(TRIM(${school})) AND LOWER(TRIM(name)) = LOWER(TRIM(${subject}))`;
     const resolvedSubject = existingSubjectRows[0]?.name || subject;
 
     await sql`
-      INSERT INTO subjects (name, strands) VALUES (${resolvedSubject}, ${JSON.stringify(strandNames || [])})
-      ON CONFLICT (name) DO UPDATE SET strands = EXCLUDED.strands
+      INSERT INTO subjects (school, name, strands) VALUES (${school}, ${resolvedSubject}, ${JSON.stringify(strandNames || [])})
+      ON CONFLICT (school, name) DO UPDATE SET strands = EXCLUDED.strands
     `;
 
     // Match by unit number first (robust across name changes between
@@ -68,8 +69,11 @@ export async function POST(req: NextRequest) {
     // difference, duplicating the entire projection map rather than
     // updating it - confirmed as the actual cause of a real duplication.
     const { rows: existingUnits } = await sql`
-      SELECT id, name, sort_order FROM units
-      WHERE LOWER(TRIM(school)) = LOWER(${school}) AND LOWER(TRIM(grade)) = LOWER(${grade}) AND LOWER(TRIM(subject)) = LOWER(${resolvedSubject})
+      SELECT u.id, u.name, u.sort_order, u.days, u.dates, u.cells,
+             um.priority_standards, um.other_deconstructed_standards, um.supporting_standards,
+             um.pre_assessment, um.post_assessment, um.common_assessment, um.curriculum_rows, um.start_date, um.end_date
+      FROM units u LEFT JOIN unit_maps um ON um.unit_id = u.id
+      WHERE LOWER(TRIM(u.school)) = LOWER(${school}) AND LOWER(TRIM(u.grade)) = LOWER(${grade}) AND LOWER(TRIM(u.subject)) = LOWER(${resolvedSubject})
     `;
     const existingByNumber = new Map<string, any>();
     const existingByName = new Map<string, any>();
@@ -81,15 +85,42 @@ export async function POST(req: NextRequest) {
     let nextOrder = existingUnits.reduce((max: number, r: any) => Math.max(max, r.sort_order || 0), -1) + 1;
 
     let created = 0, updated = 0;
+    const unitDiffs: { unitName: string; diff: { resolved: string[]; newlyIntroduced: string[]; stillPresent: string[] } }[] = [];
     for (const unit of units) {
       const unitNum = extractUnitNumber(unit.name);
       const existing = (unitNum !== null ? existingByNumber.get(unitNum) : undefined) || existingByName.get(unit.name);
       if (existing) {
+        // Compute before-state issues using summarizeIssues - the same
+        // machinery already proven for Unit Map re-imports - so a teacher
+        // fixing a Projection Map issue (e.g. clearly marking a priority
+        // standard) and re-uploading sees it reflected as "resolved" here
+        // too, not just on the Unit Map side.
+        const linkedUnitMap = existing.priority_standards !== null && existing.priority_standards !== undefined ? {
+          priorityStandards: existing.priority_standards || [],
+          otherDeconstructedStandards: existing.other_deconstructed_standards || [],
+          supportingStandards: existing.supporting_standards || [],
+          preAssessment: existing.pre_assessment || {},
+          postAssessment: existing.post_assessment || {},
+          commonAssessment: existing.common_assessment || {},
+          curriculumRows: existing.curriculum_rows || [],
+          startDate: existing.start_date || "",
+          endDate: existing.end_date || "",
+        } : null;
+        const beforeUnit = { id: existing.id, name: existing.name || "", days: existing.days || "", dates: existing.dates || "", cells: existing.cells || {} };
+        const beforeIssues = summarizeIssues(beforeUnit, linkedUnitMap);
+
         await sql`
           UPDATE units SET name = ${unit.name}, days = ${unit.days || ""}, dates = ${unit.dates || ""}, cells = ${JSON.stringify(unit.cells || {})}
           WHERE id = ${existing.id}
         `;
         updated++;
+
+        const afterUnit = { id: existing.id, name: unit.name || "", days: unit.days || "", dates: unit.dates || "", cells: unit.cells || {} };
+        const afterIssues = summarizeIssues(afterUnit, linkedUnitMap);
+        const diff = diffIssues(beforeIssues, afterIssues);
+        if (diff.resolved.length > 0 || diff.newlyIntroduced.length > 0) {
+          unitDiffs.push({ unitName: unit.name, diff });
+        }
       } else {
         const id = `u${slugify(unit.name)}${Date.now().toString(36).slice(-5)}${Math.random().toString(36).slice(2, 5)}`;
         await sql`
@@ -101,7 +132,7 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    return NextResponse.json({ ok: true, created, updated });
+    return NextResponse.json({ ok: true, created, updated, unitDiffs });
   } catch (err: any) {
     return NextResponse.json({ error: err.message || "Request failed" }, { status: 500 });
   }

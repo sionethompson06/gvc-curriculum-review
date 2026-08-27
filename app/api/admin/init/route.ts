@@ -33,10 +33,22 @@ async function runInit() {
   try {
     await ensureSchema();
 
-    for (const [subjectName, strands] of Object.entries(SEED.subjects)) {
+    // Derive (school, subject) pairs from the map keys themselves, rather
+    // than SEED.subjects directly - that object is a flat subject-name-to-
+    // strands lookup with no school scoping of its own (every subject in
+    // it is currently TEACH Academy's), so deriving pairs from the maps
+    // ensures each school gets its own subjects row instead of one global
+    // row per subject name reused across schools.
+    const seenSchoolSubject = new Set<string>();
+    for (const key of Object.keys(SEED.maps)) {
+      const [school, , subject] = key.split("|||");
+      const pairKey = `${school}|||${subject}`;
+      if (seenSchoolSubject.has(pairKey)) continue;
+      seenSchoolSubject.add(pairKey);
+      const strands = (SEED.subjects as any)[subject] || [];
       await sql`
-        INSERT INTO subjects (name, strands) VALUES (${subjectName}, ${JSON.stringify(strands)})
-        ON CONFLICT (name) DO UPDATE SET strands = EXCLUDED.strands
+        INSERT INTO subjects (school, name, strands) VALUES (${school}, ${subject}, ${JSON.stringify(strands)})
+        ON CONFLICT (school, name) DO UPDATE SET strands = EXCLUDED.strands
       `;
     }
 

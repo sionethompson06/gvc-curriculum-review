@@ -12,18 +12,18 @@ export function schoolFromSlug(slug: string): string | undefined {
   return SCHOOLS.find((s) => slugify(s) === slug);
 }
 
-export async function listSubjects(): Promise<string[]> {
-  const { rows } = await sql`SELECT name FROM subjects ORDER BY name`;
+export async function listSubjects(school: string): Promise<string[]> {
+  const { rows } = await sql`SELECT name FROM subjects WHERE LOWER(TRIM(school)) = LOWER(${school}) ORDER BY name`;
   return rows.map((r: any) => r.name);
 }
 
-export async function subjectFromSlug(slug: string): Promise<string | undefined> {
-  const subjects = await listSubjects();
+export async function subjectFromSlug(school: string, slug: string): Promise<string | undefined> {
+  const subjects = await listSubjects(school);
   return subjects.find((s) => slugify(s) === slug);
 }
 
-export async function strandsFor(subject: string): Promise<string[]> {
-  const { rows } = await sql`SELECT strands FROM subjects WHERE name = ${subject}`;
+export async function strandsFor(school: string, subject: string): Promise<string[]> {
+  const { rows } = await sql`SELECT strands FROM subjects WHERE LOWER(TRIM(school)) = LOWER(${school}) AND name = ${subject}`;
   return (rows[0]?.strands as string[]) || [];
 }
 
@@ -633,6 +633,9 @@ export function summarizeIssues(unit: Unit, um: UnitMap | null): string[] {
   const completeness = computeTemplateCompleteness(um);
   completeness.missingItems.forEach((i) => issues.push(`Completeness: ${i}`));
 
+  const priorityClarity = computeProjectionMapPriorityClarity(unit);
+  priorityClarity.unclearEntries.forEach((e) => issues.push(`Projection Map: ${e.code} (${e.strand}) has no highlighting or explicit label - priority status unclear`));
+
   const align = computeUnitAlignment(unit, um);
   if (align.missingFromUnitMap.length) issues.push(`Alignment: Projection Map promises ${align.missingFromUnitMap.join(", ")} but Unit Map never addresses it`);
   if (align.extraInUnitMap.length) issues.push(`Alignment: Unit Map covers ${align.extraInUnitMap.join(", ")}, not on the Projection Map`);
@@ -645,6 +648,24 @@ export function summarizeIssues(unit: Unit, um: UnitMap | null): string[] {
   internal.typeTargetMismatches.forEach((m) => issues.push(`Internal alignment: ${m.code} has ${m.categories.join("/")} target(s) but type marking omits ${m.categories.length > 1 ? "them" : "it"}`));
   internal.verbCategoryMismatches.forEach((m) => issues.push(`Internal alignment: ${m.code} off-verb (marked ${m.markedNotSupportedByVerbs.join("/") || "-"}, verb suggests ${m.verbSuggestsNotMarked.join("/") || "-"})`));
   internal.droppedTargets.forEach((d) => issues.push(`Internal alignment: ${d.code} has ${d.statements.length} target(s) dropped from the Curriculum Map`));
+
+  // Assessment questions live inside the Unit Map's own assessment blocks
+  // (pre/post/common), same as how the unit page itself assembles them -
+  // included here so a teacher fixing an assessment gap and re-uploading
+  // sees it reflected as "resolved" in the diff, rather than assessment
+  // issues being invisible to the re-import comparison entirely.
+  const allAssessmentQuestions = [
+    ...(um?.preAssessment?.questions || []),
+    ...(um?.postAssessment?.questions || []),
+    ...(um?.commonAssessment?.questions || []),
+  ];
+  if (allAssessmentQuestions.length > 0) {
+    const assessmentCompleteness = computeAssessmentCompleteness(um?.priorityStandards || [], allAssessmentQuestions);
+    assessmentCompleteness.missingItems.forEach((i) => issues.push(`Assessment completeness: ${i}`));
+    const assessmentAlignment = computeAssessmentAlignment(um?.priorityStandards || [], um?.otherDeconstructedStandards || [], allAssessmentQuestions);
+    assessmentAlignment.invalidStandardTags.forEach((t) => issues.push(`Assessment alignment: Q${t.questionNumber} tagged with unknown standard ${t.standardCode}`));
+    assessmentAlignment.invalidCategoryTags.forEach((t) => issues.push(`Assessment alignment: Q${t.questionNumber} tagged ${t.standardCode}-${t.category}, but that category was never marked for ${t.standardCode}`));
+  }
 
   return issues;
 }
