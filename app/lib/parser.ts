@@ -230,14 +230,28 @@ export function splitIntoUnitChunks(rawText: string): { title: string; text: str
   // spread across the whole unit's content (number case - collapse if the
   // extracted unit number matches the most recently kept match, regardless
   // of distance, since there's no other unit's boundary in between).
-  // Neither rule alone covers both real cases seen; both together do.
+  // Neither rule alone covers both real cases seen; both together do -
+  // EXCEPT the number rule also needs a guard: a real document had a third
+  // unit's delimiter mistakenly reuse "Unit 2" (a genuine typo, not the
+  // same unit continuing) with entirely different content and its own
+  // distinct "Plan Start Date". Tried gating on an intervening "Grade
+  // Level/Team:" row first, but that signal isn't reliable either - a
+  // document with one unit spread across several tables restates that
+  // row identically in each table too. Plan Start Date is the signal that
+  // actually distinguishes them: identical across every redundant
+  // restatement of the SAME unit, genuinely different for a separate one
+  // even when mislabeled with a reused number.
+  const extractStartDate = (text: string) => text.match(/Plan Start Date:\s*\|?\s*([^|]+?)\s*\|/i)?.[1]?.trim() || null;
   const matches: typeof rawMatches = [];
   rawMatches.forEach((m, i) => {
     if (i === 0) { matches.push(m); return; }
     const prev = matches[matches.length - 1];
     const closeby = m.index! - (prev.index! + prev[0].length) <= 300;
     const sameNumber = extractNum(m[0]) !== null && extractNum(m[0]) === extractNum(prev[0]);
-    if (!closeby && !sameNumber) matches.push(m);
+    const prevDate = extractStartDate(rawText.slice(prev.index!, prev.index! + 500));
+    const thisDate = extractStartDate(rawText.slice(m.index!, m.index! + 500));
+    const genuinelyDifferentUnit = prevDate !== null && thisDate !== null && prevDate !== thisDate;
+    if (!closeby && !(sameNumber && !genuinelyDifferentUnit)) matches.push(m);
   });
   const chunks: { title: string; text: string }[] = [];
   matches.forEach((m, i) => {
