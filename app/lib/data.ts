@@ -323,10 +323,20 @@ export function computeUnitAlignment(unit: Unit, um: UnitMap | null): AlignmentR
   return { missingFromUnitMap, extraInUnitMap, dateIssue, hasUnitMap: !!um };
 }
 
+// Subjects genuinely taught as one combined course across a grade band
+// (confirmed for PE: one 5-6 course, one 7-8 course, not four separate
+// per-grade courses) legitimately produce identical Projection Map
+// content across those grades - that's the intended design, not a
+// forgotten template update. Excluded here so the warning stays a
+// reliable signal rather than crying wolf on cases the team already
+// knows about and intends.
+const BAND_TAUGHT_SUBJECTS = new Set(["PE"]);
+
 export async function detectDuplicateContent() {
   const entries = await allMapEntries();
   const bySubjectSchool: Record<string, { grade: string; sig: string }[]> = {};
   entries.forEach(({ school, grade, subject, map }) => {
+    if (BAND_TAUGHT_SUBJECTS.has(subject)) return;
     const codes: string[] = [];
     map.units.forEach((u) => Object.values(u.cells || {}).forEach((stds) => stds.forEach((s) => codes.push(s.code))));
     if (codes.length === 0) return;
