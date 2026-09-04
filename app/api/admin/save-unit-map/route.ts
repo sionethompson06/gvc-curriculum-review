@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { sql } from "@vercel/postgres";
 import { ensureSchema } from "../../../lib/db";
-import { summarizeIssues, diffIssues } from "../../../lib/data";
+import { summarizeIssues, diffIssues, logRevision } from "../../../lib/data";
 import type { Unit, UnitMap } from "../../../lib/types";
 
 function slugify(name: string): string {
@@ -106,6 +106,7 @@ export async function POST(req: NextRequest) {
     };
     const afterIssues = summarizeIssues(unitForChecks, afterUnitMap);
     const diff = diffIssues(beforeIssues, afterIssues);
+    await logRevision(unitId, "unit_map", diff);
 
     return NextResponse.json({ ok: true, unitId, isReimport: !!previousUnitMapRow, diff });
   } catch (err: any) {

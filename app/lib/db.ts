@@ -58,4 +58,20 @@ export async function ensureSchema() {
     author TEXT,
     created_at TIMESTAMPTZ DEFAULT now()
   )`;
+  // Persistent log of every Unit Map / Projection Map upload's before/after
+  // diff, per unit - the mechanical diff shown at import time was
+  // previously the only record a revision happened at all; once teachers
+  // are cycling through several rounds of fixes across three schools,
+  // being able to look back at "did round 3 actually resolve what was
+  // flagged, or did new issues appear" requires this to persist rather
+  // than only existing in the moment of upload.
+  await sql`CREATE TABLE IF NOT EXISTS revisions (
+    id SERIAL PRIMARY KEY,
+    unit_id TEXT REFERENCES units(id) ON DELETE CASCADE,
+    doc_type TEXT NOT NULL,
+    resolved JSONB NOT NULL DEFAULT '[]',
+    newly_introduced JSONB NOT NULL DEFAULT '[]',
+    still_present JSONB NOT NULL DEFAULT '[]',
+    created_at TIMESTAMPTZ DEFAULT now()
+  )`;
 }

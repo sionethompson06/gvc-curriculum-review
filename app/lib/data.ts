@@ -694,6 +694,47 @@ export function diffIssues(before: string[], after: string[]): IssueDiff {
   };
 }
 
+/** Persists a revision's diff so it survives past the moment of upload -
+ * called from both save-unit-map and save-projection-map after computing
+ * a before/after diff, for both first-time creation (before=[], so
+ * everything present shows as "newly introduced" - the initial baseline)
+ * and later re-uploads. docType records which document triggered this
+ * revision ("unit_map" or "projection_map"), since a unit can be revised
+ * from either side independently. */
+export async function logRevision(unitId: string, docType: "unit_map" | "projection_map", diff: IssueDiff): Promise<void> {
+  await sql`
+    INSERT INTO revisions (unit_id, doc_type, resolved, newly_introduced, still_present)
+    VALUES (${unitId}, ${docType}, ${JSON.stringify(diff.resolved)}, ${JSON.stringify(diff.newlyIntroduced)}, ${JSON.stringify(diff.stillPresent)})
+  `;
+}
+
+export interface RevisionEntry {
+  id: number;
+  docType: string;
+  resolved: string[];
+  newlyIntroduced: string[];
+  stillPresent: string[];
+  createdAt: string;
+}
+
+/** Retrieves a unit's full revision history, most recent first - lets the
+ * CAO look back across multiple rounds of a teacher's fixes rather than
+ * only ever seeing the single most recent diff. */
+export async function getRevisionHistory(unitId: string): Promise<RevisionEntry[]> {
+  const { rows } = await sql`
+    SELECT id, doc_type, resolved, newly_introduced, still_present, created_at
+    FROM revisions WHERE unit_id = ${unitId} ORDER BY created_at DESC
+  `;
+  return rows.map((r: any) => ({
+    id: r.id,
+    docType: r.doc_type,
+    resolved: r.resolved || [],
+    newlyIntroduced: r.newly_introduced || [],
+    stillPresent: r.still_present || [],
+    createdAt: r.created_at,
+  }));
+}
+
 // --- Assessment completion and alignment checks. Mirrors the same
 // completion/alignment/quality framework used everywhere else: completion
 // checks whether every marked target actually gets assessed by something;

@@ -2,7 +2,7 @@ import { notFound } from "next/navigation";
 import Breadcrumb from "../../../../components/Breadcrumb";
 import ReviewPanel from "../../../../components/ReviewPanel";
 import NotesPanel from "../../../../components/NotesPanel";
-import { schoolFromSlug, subjectFromSlug, getMap, computeUnitAlignment, computeProjectionMapPriorityClarity, computeInternalAlignment, computeTemplateCompleteness, computeAssessmentCompleteness, computeAssessmentAlignment, getReviewsForUnit, getNotesForUnit, matchTargetStatementToCategory, findMatchingPriorityStandard } from "../../../../lib/data";
+import { schoolFromSlug, subjectFromSlug, getMap, computeUnitAlignment, computeProjectionMapPriorityClarity, computeInternalAlignment, computeTemplateCompleteness, computeAssessmentCompleteness, computeAssessmentAlignment, getReviewsForUnit, getNotesForUnit, getRevisionHistory, matchTargetStatementToCategory, findMatchingPriorityStandard } from "../../../../lib/data";
 import type { CurriculumRow, PriorityStandardDeconstruction } from "../../../../lib/types";
 
 export const dynamic = "force-dynamic";
@@ -145,9 +145,11 @@ export default async function UnitPage({ params }: { params: { school: string; g
 
   let pastReviews: Awaited<ReturnType<typeof getReviewsForUnit>> = [];
   let notes: Awaited<ReturnType<typeof getNotesForUnit>> = [];
+  let revisionHistory: Awaited<ReturnType<typeof getRevisionHistory>> = [];
   try {
     pastReviews = await getReviewsForUnit(unit.id);
     notes = await getNotesForUnit(unit.id);
+    revisionHistory = await getRevisionHistory(unit.id);
   } catch {
     // schema may not exist yet
   }
@@ -529,6 +531,40 @@ ${allAssessmentQuestions.map((q) => {
             </>
           )}
         </>
+      )}
+
+      {revisionHistory.length > 0 && (
+        <div className="panel" style={{ marginBottom: 18 }}>
+          <div className="panel-head"><h3>Revision History</h3></div>
+          <div className="panel-body">
+            <p style={{ marginTop: 0, marginBottom: 12, fontSize: 12.5, color: "var(--ink-soft)" }}>
+              Every past upload's before/after diff for this unit, most recent first - lets you see whether a teacher's revision actually resolved what was flagged, or whether new issues appeared instead.
+            </p>
+            {revisionHistory.map((rev) => {
+              const date = new Date(rev.createdAt).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
+              const docLabel = rev.docType === "unit_map" ? "Unit Map upload" : "Projection Map upload";
+              const noChange = rev.resolved.length === 0 && rev.newlyIntroduced.length === 0;
+              return (
+                <div key={rev.id} style={{ marginBottom: 14, paddingBottom: 14, borderBottom: "1px solid var(--line)" }}>
+                  <div style={{ fontSize: 12.5, fontWeight: 700, marginBottom: 6 }}>{docLabel} — {date}</div>
+                  {noChange && <div style={{ fontSize: 12, color: "var(--slate)" }}>No change from the previous version{rev.stillPresent.length > 0 ? ` — ${rev.stillPresent.length} issue${rev.stillPresent.length > 1 ? "s" : ""} still open` : ""}.</div>}
+                  {rev.resolved.length > 0 && (
+                    <div style={{ marginBottom: 6 }}>
+                      <div style={{ fontSize: 11.5, fontWeight: 700, color: "var(--teal)", marginBottom: 3 }}>✓ Resolved ({rev.resolved.length})</div>
+                      <ul style={{ margin: 0, paddingLeft: 18 }}>{rev.resolved.map((i, ii) => <li key={ii} style={{ fontSize: 12, marginBottom: 2 }}>{i}</li>)}</ul>
+                    </div>
+                  )}
+                  {rev.newlyIntroduced.length > 0 && (
+                    <div>
+                      <div style={{ fontSize: 11.5, fontWeight: 700, color: "var(--rust)", marginBottom: 3 }}>New ({rev.newlyIntroduced.length})</div>
+                      <ul style={{ margin: 0, paddingLeft: 18 }}>{rev.newlyIntroduced.map((i, ii) => <li key={ii} style={{ fontSize: 12, marginBottom: 2 }}>{i}</li>)}</ul>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
       )}
 
       <ReviewPanel reviewContext={reviewContext} unitId={unit.id} pastReviews={pastReviews} />

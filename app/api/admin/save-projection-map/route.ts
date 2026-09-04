@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { sql } from "@vercel/postgres";
 import { ensureSchema } from "../../../lib/db";
-import { summarizeIssues, diffIssues } from "../../../lib/data";
+import { summarizeIssues, diffIssues, logRevision } from "../../../lib/data";
 
 function slugify(name: string): string {
   return name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
@@ -118,6 +118,7 @@ export async function POST(req: NextRequest) {
         const afterUnit = { id: existing.id, name: unit.name || "", days: unit.days || "", dates: unit.dates || "", cells: unit.cells || {} };
         const afterIssues = summarizeIssues(afterUnit, linkedUnitMap);
         const diff = diffIssues(beforeIssues, afterIssues);
+        await logRevision(existing.id, "projection_map", diff);
         if (diff.resolved.length > 0 || diff.newlyIntroduced.length > 0) {
           unitDiffs.push({ unitName: unit.name, diff });
         }
@@ -129,6 +130,13 @@ export async function POST(req: NextRequest) {
         `;
         nextOrder++;
         created++;
+
+        // A brand-new unit has no linked Unit Map yet, so "before" is
+        // simply nothing existing - everything summarizeIssues finds for
+        // the freshly-created unit shows as the initial baseline.
+        const newUnit = { id, name: unit.name || "", days: unit.days || "", dates: unit.dates || "", cells: unit.cells || {} };
+        const initialIssues = summarizeIssues(newUnit, null);
+        await logRevision(id, "projection_map", diffIssues([], initialIssues));
       }
     }
 
