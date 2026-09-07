@@ -128,20 +128,31 @@ function buildProjectionMapFromRows(rows: string[][], hasHighlightData = false):
 
   // Row 0: header row - first cell is a grade/title label (skipped), the
   // rest are unit names, often with an embedded day count in one of a few
-  // observed conventions: "Unit 1 28 days", "Unit 1 ~ 15 days", or
-  // "Unit 1 # Days 25" (a literal "#" placeholder the teacher filled in
-  // after rather than replacing). Some documents also embed a date range
-  // directly in the header cell alongside the day count (e.g. "Unit 1 #
-  // Days 15 8/12- 9/01") - captured here as a fallback for row 1 below.
+  // observed conventions: "Unit 1 28 days", "Unit 1 ~ 15 days", "Unit 1 #
+  // Days 25" (a literal "#" placeholder the teacher filled in after rather
+  // than replacing), or "Unit 1 #10 Days" (the number placed between the
+  // "#" and the word "Days", rather than before or after both together).
+  // Some documents also embed a date range directly in the header cell
+  // alongside the day count (e.g. "Unit 1 # Days 15 8/12- 9/01") -
+  // captured here as a fallback for row 1 below.
   const headerRow = rows[0];
   const unitNames: string[] = [];
   const unitDays: string[] = [];
   const headerEmbeddedDates: string[] = [];
   for (let i = 1; i < headerRow.length; i++) {
     const cell = cleanCellText(headerRow[i]);
-    const dayMatch = cell.match(/#?\s*days?\s*[:\-]?\s*(\d+)|(\d+)\s*days?\b/i);
-    const days = dayMatch ? (dayMatch[1] || dayMatch[2]) : "";
-    const name = dayMatch ? cell.slice(0, dayMatch.index).replace(/[~\s]+$/, "").trim() : cell.trim();
+    const dayMatch = cell.match(/#\s*(\d+)\s*days?\b|#?\s*days?\s*[:\-]?\s*(\d+)|(\d+)\s*days?\b/i);
+    const days = dayMatch ? (dayMatch[1] || dayMatch[2] || dayMatch[3]) : "";
+    let name = dayMatch ? cell.slice(0, dayMatch.index).replace(/[~\s]+$/, "").trim() : cell.trim();
+    const dateMatch = cell.match(/(\d{1,2}\s*\/\s*\d{1,2})\s*-\s*(\d{1,2}\s*\/\s*\d{1,2}(?:\/\d{2,4})?)/);
+    // A real document embeds only a date range directly after the unit
+    // number with no "days" word at all ("Unit 1 8/12-8/30") - the
+    // day-count stripping above never triggers for these, leaving the
+    // date cluttering the unit's display name even though it's already
+    // captured separately below via headerEmbeddedDates.
+    if (dateMatch && name.includes(dateMatch[0])) {
+      name = name.replace(dateMatch[0], "").trim();
+    }
     // "Column ${i}" rather than "Unit ${i}" - an unnamed column (e.g. this
     // grade's document leaves the first data column label blank, even
     // though it holds real Beginning-of-School content like "Introductions"
@@ -149,7 +160,6 @@ function buildProjectionMapFromRows(rows: string[][], hasHighlightData = false):
     // "Unit N" column elsewhere in the same header row.
     unitNames.push(name || `Column ${i}`);
     unitDays.push(days || "");
-    const dateMatch = cell.match(/(\d{1,2}\s*\/\s*\d{1,2})\s*-\s*(\d{1,2}\s*\/\s*\d{1,2})/);
     headerEmbeddedDates.push(dateMatch ? `${dateMatch[1].replace(/\s+/g, "")}-${dateMatch[2].replace(/\s+/g, "")}` : "");
   }
 
@@ -217,14 +227,35 @@ function buildProjectionMapFromRows(rows: string[][], hasHighlightData = false):
   type StrandGroup = { label: string; rows: string[][] };
   const groups: StrandGroup[] = [];
   const strandStartRow = row1HasNonDateContent ? 1 : 2;
+  // The dates row's own label is sometimes not actually "Dates" at all -
+  // a real document had row 1 labeled "Common Core Standards" while its
+  // cells genuinely contained date ranges (a real mislabeling in the
+  // source). That row is correctly skipped as dates by content, but its
+  // label was clearly meant for the row that follows - which itself has
+  // an empty label. Without reusing it, that row's real content (and
+  // everything grouped under it) had no group to attach to and was
+  // silently dropped entirely, for every unit in the whole document.
+  const datesRowLabel = cleanCellText((datesRow[0] || "").replace(/<\/?mark>/gi, ""));
+  const reusableDatesLabel = datesRowLabel && !/dates?/i.test(datesRowLabel) ? datesRowLabel : "";
   for (let r = strandStartRow; r < rows.length; r++) {
     const row = rows[r];
     const rawLabel = (row[0] || "").replace(/<\/?mark>/gi, "");
     const cleanLabel = cleanCellText(rawLabel);
     const rowHasAnyContent = row.some((c) => c.replace(/<\/?mark>/gi, "").trim());
     if (!cleanLabel) {
-      if (!rowHasAnyContent) break; // fully empty row - end of the real table
-      if (groups.length > 0) groups[groups.length - 1].rows.push(row);
+      // A fully empty row mid-table is not necessarily the end of real
+      // content - a real document left several strand categories
+      // completely blank (Reading Literature, Reading Informational, etc.)
+      // while a later row (ELD Standards) still had real content after
+      // them. The loop's natural bound (rows.length, scoped to this one
+      // table by parseRowsFromHtml) and the explicit STOP_PATTERNS below
+      // already prevent reading into legend/footer text, which lives in
+      // its own separate table anyway - so there's no need to also break
+      // here, and doing so risks silently dropping real, later content.
+      if (rowHasAnyContent) {
+        if (groups.length > 0) groups[groups.length - 1].rows.push(row);
+        else if (reusableDatesLabel) groups.push({ label: reusableDatesLabel, rows: [row] });
+      }
       continue;
     }
     if (STOP_PATTERNS.some((p) => p.test(cleanLabel)) || isEmptyStandardMarker(cleanLabel, row)) break;
