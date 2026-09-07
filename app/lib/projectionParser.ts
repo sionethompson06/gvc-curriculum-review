@@ -142,29 +142,52 @@ function buildProjectionMapFromRows(rows: string[][], hasHighlightData = false):
     headerEmbeddedDates.push(dateMatch ? `${dateMatch[1].replace(/\s+/g, "")}-${dateMatch[2].replace(/\s+/g, "")}` : "");
   }
 
-  // Row 1 is usually a pure "dates" row, but at least one real document (a
-  // PE projection map) merges it with the first strand's content - its
-  // label reads "'25-'26 Dates (standard type)", and only some of its
-  // cells actually look like dates while the rest hold real standards
-  // content that a blanket "row 1 is always dates, always skip it" rule
-  // would silently drop. Check each cell individually: use it as a date
-  // if it looks like one (short, contains a slash-separated day/month
-  // pair), otherwise fall back to any date embedded in that column's
-  // header cell, and let the strand-grouping loop below include row 1 as
-  // real content instead of skipping it outright.
+  // Row 1 is usually a pure "dates" row, but real documents complicate
+  // this in two different ways:
+  // (1) A PE projection map merges it with the first strand's content -
+  //     its label reads "'25-'26 Dates (standard type)", and only some of
+  //     its cells actually look like dates while the rest hold real
+  //     standards content that a blanket "row 1 is always dates, always
+  //     skip it" rule would silently drop.
+  // (2) TEACH Prep's TK ELA projection map combines a date range with the
+  //     unit's theme name in every cell - e.g. "Unit 1: Who We Are (Aug 26
+  //     – Sep 20)" - and writes the date in month-name form rather than
+  //     the numeric "8/26-9/20" form every other document uses. Neither
+  //     the length-based nor the numeric-slash check recognizes this, so
+  //     the whole row was misclassified as a strand named "'25-'26 Dates"
+  //     and the real per-unit dates never made it into the data at all.
+  // Check each cell individually: use it as a date if it looks like one
+  // outright (short, numeric slash-separated pair), or extract an
+  // embedded date range (numeric or month-name) from within a longer
+  // cell. Whether the remainder of a cell with an embedded date counts as
+  // real strand content depends on whether it has extractable standard
+  // codes - a bare theme name like "Who We Are" never will, so it's
+  // correctly treated as pure date-row context rather than a spurious
+  // strand (case 2), while PE's genuine standards prose alongside a date
+  // still is (case 1, unaffected by this addition since PE's non-date
+  // cells never contain a date range to begin with).
   const looksLikeDate = (text: string) => {
     const t = text.trim();
     return !!t && t.length <= 24 && /\d{1,2}\s*\/\s*\d{1,2}/.test(t);
   };
+  const extractEmbeddedDateRange = (text: string): string => {
+    const numeric = text.match(/(\d{1,2}\s*\/\s*\d{1,2})\s*[-–—]\s*(\d{1,2}\s*\/\s*\d{1,2})/);
+    if (numeric) return `${numeric[1].replace(/\s+/g, "")}-${numeric[2].replace(/\s+/g, "")}`;
+    const monthName = text.match(/([A-Z][a-z]{2,8}\s+\d{1,2})\s*[-–—]\s*([A-Z][a-z]{2,8}\s+\d{1,2})/);
+    return monthName ? `${monthName[1]} - ${monthName[2]}` : "";
+  };
   const datesRow = rows[1] || [];
   const unitDates: string[] = unitNames.map((_, i) => {
     const cell = cleanCellText(datesRow[i + 1] || "");
-    return looksLikeDate(cell) ? cell : (headerEmbeddedDates[i] || "");
+    if (looksLikeDate(cell)) return cell;
+    const embedded = extractEmbeddedDateRange(cell);
+    return embedded || headerEmbeddedDates[i] || "";
   });
   const row1HasNonDateContent = datesRow.some((c, i) => {
     if (i === 0) return false;
     const cell = cleanCellText((c || "").replace(/<\/?mark>/gi, ""));
-    return !!cell.trim() && !looksLikeDate(cell);
+    if (!cell.trim() || looksLikeDate(cell)) return false;
+    return extractCodes(cell).length > 0;
   });
 
   const units: ParsedProjectionUnit[] = unitNames.map((name, i) => ({
