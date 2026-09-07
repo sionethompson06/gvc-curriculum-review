@@ -27,6 +27,14 @@ export async function ensureSchema() {
   await sql`ALTER TABLE unit_maps ADD COLUMN IF NOT EXISTS supporting_standards JSONB NOT NULL DEFAULT '[]'`;
   await sql`ALTER TABLE unit_maps ADD COLUMN IF NOT EXISTS common_assessment JSONB NOT NULL DEFAULT '{}'`;
   await sql`ALTER TABLE unit_maps ADD COLUMN IF NOT EXISTS other_deconstructed_standards JSONB NOT NULL DEFAULT '[]'`;
+  // Persists the raw "CHOOSE PRIORITY STANDARD(S)" text separately from
+  // the parsed priority_standards array - needed to distinguish "field
+  // left blank" from "field written out in narrative form with no CCSS
+  // code identifier in it at all" (found in TEACH Prep's TK documents) -
+  // priority_standards would be an empty array in BOTH cases, since it's
+  // built by iterating over the extracted codes, so there's no way to
+  // tell these two real, different situations apart without this.
+  await sql`ALTER TABLE unit_maps ADD COLUMN IF NOT EXISTS chosen_priority_raw_text TEXT NOT NULL DEFAULT ''`;
   await sql`CREATE TABLE IF NOT EXISTS subjects (
     name TEXT NOT NULL,
     strands JSONB NOT NULL DEFAULT '[]'

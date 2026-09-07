@@ -45,7 +45,7 @@ export async function POST(req: NextRequest) {
       const { rows } = await sql`
         SELECT u.id, u.name, u.days, u.dates, u.cells,
                um.priority_standards, um.other_deconstructed_standards, um.supporting_standards,
-               um.pre_assessment, um.post_assessment, um.common_assessment, um.curriculum_rows, um.start_date, um.end_date
+               um.pre_assessment, um.post_assessment, um.common_assessment, um.curriculum_rows, um.start_date, um.end_date, um.chosen_priority_raw_text
         FROM units u LEFT JOIN unit_maps um ON um.unit_id = u.id
         WHERE u.id = ${unitId} AND LOWER(TRIM(u.school)) = LOWER(${school}) AND LOWER(TRIM(u.grade)) = LOWER(${grade}) AND LOWER(TRIM(u.subject)) = LOWER(${resolvedSubject})
       `;
@@ -64,6 +64,7 @@ export async function POST(req: NextRequest) {
           curriculumRows: unitRow.curriculum_rows || [],
           startDate: unitRow.start_date || "",
           endDate: unitRow.end_date || "",
+          chosenPriorityRawText: unitRow.chosen_priority_raw_text || "",
         };
       }
     } else {
@@ -86,11 +87,11 @@ export async function POST(req: NextRequest) {
     const beforeIssues = summarizeIssues(unitForChecks, previousUnitMapRow);
 
     await sql`
-      INSERT INTO unit_maps (unit_id, priority_standards, other_deconstructed_standards, supporting_standards, pre_assessment, post_assessment, common_assessment, curriculum_rows, start_date, end_date)
+      INSERT INTO unit_maps (unit_id, priority_standards, other_deconstructed_standards, supporting_standards, pre_assessment, post_assessment, common_assessment, curriculum_rows, start_date, end_date, chosen_priority_raw_text)
       VALUES (${unitId}, ${JSON.stringify(parsed.priorityStandards || [])}, ${JSON.stringify(parsed.otherDeconstructedStandards || [])}, ${JSON.stringify(parsed.supportingStandards || [])}, ${JSON.stringify(parsed.preAssessment || {})},
-              ${JSON.stringify(parsed.postAssessment || {})}, ${JSON.stringify(parsed.commonAssessment || {})}, ${JSON.stringify(parsed.curriculumRows || [])}, ${parsed.startDate || ""}, ${parsed.endDate || ""})
+              ${JSON.stringify(parsed.postAssessment || {})}, ${JSON.stringify(parsed.commonAssessment || {})}, ${JSON.stringify(parsed.curriculumRows || [])}, ${parsed.startDate || ""}, ${parsed.endDate || ""}, ${parsed.chosenPriorityRawText || ""})
       ON CONFLICT (unit_id) DO UPDATE SET priority_standards=EXCLUDED.priority_standards, other_deconstructed_standards=EXCLUDED.other_deconstructed_standards, supporting_standards=EXCLUDED.supporting_standards, pre_assessment=EXCLUDED.pre_assessment,
-        post_assessment=EXCLUDED.post_assessment, common_assessment=EXCLUDED.common_assessment, curriculum_rows=EXCLUDED.curriculum_rows, start_date=EXCLUDED.start_date, end_date=EXCLUDED.end_date
+        post_assessment=EXCLUDED.post_assessment, common_assessment=EXCLUDED.common_assessment, curriculum_rows=EXCLUDED.curriculum_rows, start_date=EXCLUDED.start_date, end_date=EXCLUDED.end_date, chosen_priority_raw_text=EXCLUDED.chosen_priority_raw_text
     `;
 
     const afterUnitMap: UnitMap = {
@@ -103,6 +104,7 @@ export async function POST(req: NextRequest) {
       curriculumRows: parsed.curriculumRows || [],
       startDate: parsed.startDate || "",
       endDate: parsed.endDate || "",
+      chosenPriorityRawText: parsed.chosenPriorityRawText || "",
     };
     const afterIssues = summarizeIssues(unitForChecks, afterUnitMap);
     const diff = diffIssues(beforeIssues, afterIssues);

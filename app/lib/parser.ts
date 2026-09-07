@@ -13,6 +13,16 @@ import type { UnitMap, PriorityStandardDeconstruction, SupportingStandard, Curri
 export interface ParsedUnitMap extends UnitMap {
   allStandardsCodes: string[];
   chosenPriorityCodes: string[];
+  // Raw text of the "CHOOSE PRIORITY STANDARD(S)" cell, kept separately
+  // from chosenPriorityCodes - a real document can have this field fully
+  // written out in narrative form (e.g. "Counting and Cardinality:
+  // Verbally count in sequence to 10...") with no CCSS/standard code
+  // identifier anywhere in it. extractCodes correctly finds nothing there,
+  // which must not be conflated with the field being left blank - they're
+  // different findings (one is "not started", the other is "described but
+  // not linked to a coded standard") and the app should report which one
+  // actually happened rather than treating both as the same gap.
+  chosenPriorityRawText: string;
 }
 
 export function cleanMarkdownLinks(text: string): string {
@@ -272,6 +282,7 @@ export function parseUnitMapRawText(rawText: string): ParsedUnitMap {
   const result: ParsedUnitMap = {
     allStandardsCodes: [],
     chosenPriorityCodes: [],
+    chosenPriorityRawText: "",
     priorityStandards: [],
     otherDeconstructedStandards: [],
     supportingStandards: [],
@@ -317,6 +328,7 @@ export function parseUnitMapRawText(rawText: string): ParsedUnitMap {
   if (idx >= 0 && idx + 1 < rows.length) {
     const chosenText = rows[idx + 1][0];
     result.chosenPriorityCodes = extractCodes(chosenText);
+    result.chosenPriorityRawText = cleanMarkdownLinks(chosenText || "").trim();
   }
 
   // Mark the standard type/s - a unit can genuinely have several separate

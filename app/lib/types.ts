@@ -77,6 +77,14 @@ export interface UnitMap {
   curriculumRows: CurriculumRow[];
   startDate?: string;
   endDate?: string;
+  // Raw text of the "CHOOSE PRIORITY STANDARD(S)" cell, persisted
+  // separately from priorityStandards - a real document can have this
+  // field fully written out in narrative form with no CCSS/standard code
+  // identifier anywhere in it (e.g. "Counting and Cardinality: Verbally
+  // count in sequence to 10..."). That must not be conflated with the
+  // field being left blank - they're different findings the app reports
+  // distinctly (see computeTemplateCompleteness).
+  chosenPriorityRawText?: string;
 }
 
 export interface SubjectMap {

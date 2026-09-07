@@ -76,6 +76,7 @@ function rowsToSubjectMap(rows: any[]): SubjectMap {
         curriculumRows: row.curriculum_rows || [],
         startDate: row.start_date || "",
         endDate: row.end_date || "",
+        chosenPriorityRawText: row.chosen_priority_raw_text || "",
       };
     }
   }
@@ -84,7 +85,7 @@ function rowsToSubjectMap(rows: any[]): SubjectMap {
 
 const JOIN_QUERY = `
   SELECT u.id, u.school, u.grade, u.subject, u.name, u.days, u.dates, u.cells, u.sort_order,
-         um.priority_standards, um.other_deconstructed_standards, um.supporting_standards, um.pre_assessment, um.post_assessment, um.common_assessment, um.curriculum_rows, um.start_date, um.end_date
+         um.priority_standards, um.other_deconstructed_standards, um.supporting_standards, um.pre_assessment, um.post_assessment, um.common_assessment, um.curriculum_rows, um.start_date, um.end_date, um.chosen_priority_raw_text
   FROM units u LEFT JOIN unit_maps um ON um.unit_id = u.id
 `;
 
@@ -115,6 +116,7 @@ export async function allMapEntries() {
         curriculumRows: row.curriculum_rows || [],
         startDate: row.start_date || "",
         endDate: row.end_date || "",
+        chosenPriorityRawText: row.chosen_priority_raw_text || "",
       };
     }
   }
@@ -390,6 +392,20 @@ export function computeTemplateCompleteness(um: UnitMap | null): TemplateComplet
   }
 
   check((um.priorityStandards || []).length > 0, "No priority standard(s) chosen for deconstruction");
+
+  // Distinct from the check above: a real document (TEACH Prep's TK Unit
+  // Maps) can have this field fully written out in narrative form - e.g.
+  // "Counting and Cardinality: Verbally count in sequence to 10..." - with
+  // no CCSS/standard code identifier anywhere in it. extractCodes
+  // correctly finds nothing there, so priorityStandards comes back empty
+  // just like a genuinely blank field would - but these are different
+  // situations worth reporting distinctly: one is "nothing started", the
+  // other is real teacher work that can't be linked back to the
+  // Projection Map's coded standards without a code identifier.
+  if ((um.priorityStandards || []).length === 0 && um.chosenPriorityRawText && um.chosenPriorityRawText.trim()) {
+    const excerpt = um.chosenPriorityRawText.trim().slice(0, 100);
+    check(false, `Priority standard(s) described in narrative form ("${excerpt}${um.chosenPriorityRawText.trim().length > 100 ? "..." : ""}") but no CCSS/standard code identifier included - cannot be linked to the Projection Map's coded standards`);
+  }
 
   const priorityStandards = um.priorityStandards || [];
   priorityStandards.forEach((ps) => {

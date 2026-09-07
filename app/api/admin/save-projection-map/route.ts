@@ -71,7 +71,7 @@ export async function POST(req: NextRequest) {
     const { rows: existingUnits } = await sql`
       SELECT u.id, u.name, u.sort_order, u.days, u.dates, u.cells,
              um.priority_standards, um.other_deconstructed_standards, um.supporting_standards,
-             um.pre_assessment, um.post_assessment, um.common_assessment, um.curriculum_rows, um.start_date, um.end_date
+             um.pre_assessment, um.post_assessment, um.common_assessment, um.curriculum_rows, um.start_date, um.end_date, um.chosen_priority_raw_text
       FROM units u LEFT JOIN unit_maps um ON um.unit_id = u.id
       WHERE LOWER(TRIM(u.school)) = LOWER(${school}) AND LOWER(TRIM(u.grade)) = LOWER(${grade}) AND LOWER(TRIM(u.subject)) = LOWER(${resolvedSubject})
     `;
@@ -105,6 +105,7 @@ export async function POST(req: NextRequest) {
           curriculumRows: existing.curriculum_rows || [],
           startDate: existing.start_date || "",
           endDate: existing.end_date || "",
+          chosenPriorityRawText: existing.chosen_priority_raw_text || "",
         } : null;
         const beforeUnit = { id: existing.id, name: existing.name || "", days: existing.days || "", dates: existing.dates || "", cells: existing.cells || {} };
         const beforeIssues = summarizeIssues(beforeUnit, linkedUnitMap);
