@@ -72,17 +72,20 @@ export function parseRows(rawText: string): string[][] {
 export function extractCodes(text: string): string[] {
   const t = cleanMarkdownLinks(text);
   const patterns: { re: RegExp; normalize?: (raw: string) => string; isBareDigit?: boolean }[] = [
-    { re: /(?<!\d)\d{1,2}\.[A-Z]{1,4}\.\d{1,2}(?:\.\d{1,2})?/g }, // 6.RP.1, 6.NS.3
-    { re: /(?<!\d)\d{1,2}\.[A-Z]{1,4}\.\s?[A-Z]\.\d{1,2}(?:\.\d{1,2})?/g, normalize: (raw: string) => raw.replace(/\s+/g, "") }, // 5.NBT.A.1, 5.MD.C.3 (official CCSS Math format with a cluster letter between domain and standard number - coexists with the shorter 3-part form for the same standard within the same document; tolerates an occasional space before the cluster letter, e.g. "5.NBT. B.7", seen where a source cell's paragraph break gets joined with a space)
+    { re: /(?<!\d)(?:\d{1,2}|K)\.[A-Z]{1,4}\.\d{1,2}(?:\.\d{1,2})?/g }, // 6.RP.1, 6.NS.3, K.CC.A.1, K.OA.A.1 (Kindergarten-level codes use the letter "K" in place of a numeric grade - no other pattern below recognized this at all, which meant EVERY Kindergarten standard code in every subject silently extracted as zero codes until this was added)
+    { re: /(?<!\d)(?:\d{1,2}|K)\.[A-Z]{1,4}\.\s?[A-Z]\.\d{1,2}(?:\.\d{1,2})?/g, normalize: (raw: string) => raw.replace(/\s+/g, "") }, // 5.NBT.A.1, 5.MD.C.3, K.NBT.A.1 (official CCSS Math format with a cluster letter between domain and standard number - coexists with the shorter 3-part form for the same standard within the same document; tolerates an occasional space before the cluster letter, e.g. "5.NBT. B.7", seen where a source cell's paragraph break gets joined with a space)
     { re: /(?<![A-Z])ELD\.[A-Z]{1,3}\.\d{1,2}\.\d{1,2}/g }, // ELD.PI.8.1
     { re: /(?<![A-Z])MP\.\d{1,2}/g }, // MP.1
     { re: /(?<![A-Z])[A-Z]{1,2}-[A-Z]{2,4}\d-\d{1,2}(?!\d)/g }, // MS-LS1-1, MS-ETS1-4 (NGSS-style; both boundaries use lookarounds - not \b - since these are sometimes glued directly to surrounding words with no space)
     { re: /(?<![A-Z])HSS-\d{1,2}\.\d{1,2}(?:\.\d{1,2})?(?!\d)/g }, // HSS-7.1, HSS-6.2.4 (official CA Dept of Education History-Social Science standard identifier format)
-    // ELA/PE-style, letters-first: RL.6.1, W.6.2, SL.6.1, PE.7.4.1 - up to
-    // three digit groups (PE genuinely uses a 3-part code, unlike ELA's
-    // 2-part) - must be checked before the bare-digit pattern below or
-    // these get silently stripped down to just the trailing digits.
-    { re: /(?<![A-Z])[A-Z]{1,2}\.\d{1,2}\.\d{1,2}(?:\.\d{1,2})?(?!\d)/g },
+    // ELA/PE-style, letters-first: RL.6.1, W.6.2, SL.6.1, PE.7.4.1, RF.K.1
+    // (Kindergarten's letter-grade form) - up to three digit groups (PE
+    // genuinely uses a 3-part code, unlike ELA's 2-part), with an optional
+    // final lowercase-letter sub-part (RF.K.1.d, RL.1.10.b) as an
+    // alternative to another numeric group - must be checked before the
+    // bare-digit pattern below or these get silently stripped down to just
+    // the trailing digits.
+    { re: /(?<![A-Z])[A-Z]{1,2}\.(?:\d{1,2}|K)\.\d{1,2}(?:\.\d{1,2}|\.[a-z])?(?!\d)/g },
     // Same shape, but with a hyphen after the letters instead of a dot -
     // PE's own source documents use both "PE.7.2.2" and "PE-7.2.2" for the
     // SAME standard inconsistently within one document. Normalized to the

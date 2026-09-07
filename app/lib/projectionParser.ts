@@ -38,8 +38,19 @@ const STOP_PATTERNS = [
   /^Italics:/i,
   /^Notes from the mapping team/i,
   /^Revision Notes/i,
-  /^Standard\s*$/i,
 ];
+
+// A row labeled exactly "Standard" is ambiguous: some documents use it as
+// leftover boilerplate marking the end of the real table (with nothing
+// else in that row), while a real TEACH Prep document (TK/Kinder) uses it
+// as its own, genuine strand row label - with real standards content in
+// every other cell. Only the former should end the table; the latter is
+// real, meaningful data that must not be discarded. Distinguished by
+// checking whether the rest of the row actually has content.
+const isEmptyStandardMarker = (label: string, row: string[]) => {
+  if (!/^Standard\s*$/i.test(label)) return false;
+  return !row.slice(1).some((c) => (c || "").replace(/<\/?mark>/gi, "").trim());
+};
 
 /** Builds one or more StandardEntry objects for a single cell.
  *
@@ -216,7 +227,7 @@ function buildProjectionMapFromRows(rows: string[][], hasHighlightData = false):
       if (groups.length > 0) groups[groups.length - 1].rows.push(row);
       continue;
     }
-    if (STOP_PATTERNS.some((p) => p.test(cleanLabel))) break;
+    if (STOP_PATTERNS.some((p) => p.test(cleanLabel)) || isEmptyStandardMarker(cleanLabel, row)) break;
     groups.push({ label: cleanLabel, rows: [row] });
   }
 

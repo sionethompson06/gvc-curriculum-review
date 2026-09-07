@@ -145,10 +145,10 @@ function extractStandardTokens(text: string): string[] {
   t = t.replace(/(?<![A-Z])([A-Z]{1,2})-(\d{1,2}\.\d{1,2}(?:\.\d{1,2})?)(?!\d)/g, "$1.$2");
   const tokens: string[] = [];
   // Official CCSS Math format with a cluster letter between domain and
-  // standard number (5.NBT.A.1, 5.MD.C.3) - checked first, since re1 below
-  // would otherwise match just the trailing "A.1" and silently lose the
-  // "5.NBT." prefix that makes the code meaningful.
-  const re0 = /\b(\d{1,2}\.[A-Z]{1,4}\.\s?[A-Z]\.\d{1,2}(?:\.\d{1,2})?)\b/g;
+  // standard number (5.NBT.A.1, 5.MD.C.3, K.NBT.A.1) - checked first, since
+  // re1 below would otherwise match just the trailing "A.1" and silently
+  // lose the "5.NBT."/"K.NBT." prefix that makes the code meaningful.
+  const re0 = /\b((?:\d{1,2}|K)\.[A-Z]{1,4}\.\s?[A-Z]\.\d{1,2}(?:\.\d{1,2})?)\b/g;
   let m0;
   while ((m0 = re0.exec(t))) tokens.push(m0[1].replace(/\s+/g, ""));
   // Letter-prefix codes (RH, WH, ELD.PI, MP, RP, NS, EE, SP, G, etc.) are always
@@ -156,8 +156,11 @@ function extractStandardTokens(text: string): string[] {
   // (rather than [A-Za-z]) avoids false positives where an ordinary lowercase
   // word ends up glued directly to a following standard code with no space
   // (e.g. source text reading "...use of fire.6.1.2. Identify..." should not
-  // be read as the code "fire.6.1.2").
-  const re1 = /\b([A-Z]{1,6}\.\d+(?:\.\d+){0,2}(?:-\d+)?)\b/g;
+  // be read as the code "fire.6.1.2"). Kindergarten-level codes use the
+  // letter "K" in place of a numeric grade (e.g. "RF.K.1.d") - without this,
+  // every Kindergarten standard code in every subject silently failed to
+  // extract at all.
+  const re1 = /\b([A-Z]{1,6}\.(?:\d+|K)(?:\.\d+){0,2}(?:\.[a-z])?(?:-\d+)?)\b/g;
   let m;
   while ((m = re1.exec(t))) tokens.push(m[1]);
   // Bare-digit codes (History's "6.1.1" style) - matches re1's structure
