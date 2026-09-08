@@ -299,13 +299,14 @@ export function extractCodes(text: string): string[] {
     { re: /(?<![A-Z])[A-Z]{1,2}-[A-Z]{2,4}\d-\d{1,2}(?!\d)/g }, // MS-LS1-1, MS-ETS1-4 (NGSS-style; both boundaries use lookarounds - not \b - since these are sometimes glued directly to surrounding words with no space)
     { re: /(?<![A-Z])HSS-\d{1,2}\.\d{1,2}(?:\.\d{1,2})?(?!\d)/g }, // HSS-7.1, HSS-6.2.4 (official CA Dept of Education History-Social Science standard identifier format)
     // ELA/PE-style, letters-first: RL.6.1, W.6.2, SL.6.1, PE.7.4.1, RF.K.1
-    // (Kindergarten's letter-grade form) - up to three digit groups (PE
-    // genuinely uses a 3-part code, unlike ELA's 2-part), with an optional
-    // final lowercase-letter sub-part (RF.K.1.d, RL.1.10.b) as an
-    // alternative to another numeric group - must be checked before the
-    // bare-digit pattern below or these get silently stripped down to just
-    // the trailing digits.
-    { re: /(?<![A-Z])[A-Z]{1,2}\.(?:\d{1,2}|K)\.\d{1,2}(?:\.\d{1,2}|\.[a-z])?(?!\d)/g },
+    // (Kindergarten's letter-grade form), RF3.4 (a real document omits the
+    // period between the letters and the grade number entirely) - up to
+    // three digit groups (PE genuinely uses a 3-part code, unlike ELA's
+    // 2-part), with an optional final lowercase-letter sub-part
+    // (RF.K.1.d, RL.1.10.b) as an alternative to another numeric group -
+    // must be checked before the bare-digit pattern below or these get
+    // silently stripped down to just the trailing digits.
+    { re: /(?<![A-Z])[A-Z]{1,2}\.?(?:\d{1,2}|K)\.\d{1,2}(?:\.\d{1,2}|\.[a-z])?(?!\d)/g },
     // Same shape, but with a hyphen after the letters instead of a dot -
     // PE's own source documents use both "PE.7.2.2" and "PE-7.2.2" for the
     // SAME standard inconsistently within one document. Normalized to the
@@ -532,7 +533,7 @@ export function parseUnitMapRawText(rawText: string): ParsedUnitMap {
   }
 
   // Supporting Standards
-  idx = findRowIndex(rows, "List Supporting Standards");
+  idx = findRowIndex(rows, "Supporting Standards");
   if (idx >= 0 && idx + 1 < rows.length) {
     const suppText = cleanMarkdownLinks(rows[idx + 1][0]);
     const suppCodes = extractCodes(suppText);

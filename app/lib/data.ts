@@ -160,7 +160,7 @@ function extractStandardTokens(text: string): string[] {
   // letter "K" in place of a numeric grade (e.g. "RF.K.1.d") - without this,
   // every Kindergarten standard code in every subject silently failed to
   // extract at all.
-  const re1 = /\b([A-Z]{1,6}\.(?:\d+|K)(?:\.\d+){0,2}(?:\.[a-z])?(?:-\d+)?)\b/g;
+  const re1 = /\b([A-Z]{1,6}\.?(?:\d+|K)(?:\.\d+){0,2}(?:\.[a-z])?(?:-\d+)?)\b/g;
   let m;
   while ((m = re1.exec(t))) tokens.push(m[1]);
   // Bare-digit codes (History's "6.1.1" style) - matches re1's structure
