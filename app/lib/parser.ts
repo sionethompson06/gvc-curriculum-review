@@ -10,6 +10,226 @@
 
 import type { UnitMap, PriorityStandardDeconstruction, SupportingStandard, CurriculumRow, AssessmentBlock } from "./types";
 
+// TEACH Prep's Unit Maps are native Google Docs, not uploaded .docx files -
+// download_file_content exports these as plain text with a structure
+// unlike anything the mammoth/HTML pipeline above handles: within one row,
+// cells are separated by "\n\t" (a newline immediately followed by a tab);
+// a plain "\n" with no tab is a paragraph break WITHIN the same cell, not a
+// new cell. Rows themselves have no single, reliable delimiter - unlike
+// docx's explicit table structure, this text export doesn't cleanly mark
+// row boundaries at all. Anchoring on the template's own fixed, known
+// label strings and taking the text between consecutive labels sidesteps
+// that ambiguity entirely, and was validated directly against a real
+// document's exact byte structure before being written this way.
+//
+// Two sections don't fit that simple "label, then its content" shape and
+// need positional handling instead, because their real content sits at a
+// fixed cell offset AFTER several other labels/prompts, not immediately
+// after their own section label:
+// - "Mark the standard type/s": a single row of 8 cells
+//   [label, codesBlob1, "Knowledge", codesBlob2, "Reasoning", codesBlob3,
+//   "Performance Skill", "Product"] - matching parseTypeMarkingRow's
+//   expected shape exactly, including genuinely-empty codesBlob cells
+//   when nothing was marked (this export format cannot carry cell
+//   highlighting at all, so type-marking here can only ever be detected
+//   from typed-out code text, never color).
+// - "Identify Learning Targets": 4 category labels, then 4 prompt
+//   questions, then the 4 real answers (Knowledge/Reasoning/Performance
+//   Skill/Product, in that fixed order) - confirmed by checking exactly
+//   where parseUnitMapRawText itself reads this (idx+3, three rows past
+//   the section label) and matching that structure precisely. Since
+//   these documents write one shared set of targets for the whole unit
+//   rather than one set per standard, the answers row is repeated once
+//   per chosen priority code so the existing per-standard reader (built
+//   for a different document's one-row-per-standard convention) still
+//   resolves every chosen code to the correct, shared text rather than
+//   only the first.
+const SIMPLE_LABELS = [
+  "Grade Level/Team:",
+  "Prioritized Standards in this Unit",
+  "Supporting Standards in this Unit",
+  "CHOOSE PRIORITY STANDARD(S)",
+  "List the nouns",
+  "Define nouns as needed",
+  "List the verbs",
+  "Define verb as needed",
+  "Determine Post Assessment",
+  "Post Assessment Scoring Agreements",
+  "Determine Pre-Assessment",
+  "Pre-Assessment Scoring Agreements",
+];
+
+export function googleDocsUnitMapToPipeText(rawText: string): string {
+  const text = rawText.replace(/^\ufeff/, "").replace(/\r\n/g, "\n");
+  const ALL_LABELS = [...SIMPLE_LABELS, "Plan Start Date:", "Mark the standard type/s", "Identify Learning Targets"];
+
+  const positions: { label: string; idx: number }[] = [];
+  for (const label of ALL_LABELS) {
+    const idx = text.indexOf(label);
+    if (idx >= 0) positions.push({ label, idx });
+  }
+  // "Unit Curriculum Map" is sometimes written with the unit number
+  // embedded instead ("Unit 3 Curriculum Map") - matched with a regex
+  // rather than an exact string for that reason. It also genuinely
+  // appears twice in some documents: once as the whole document's own
+  // title near the very top, and again as the real section's header
+  // further down - the LAST match is used since the section header is
+  // always the more recent occurrence relative to the title.
+  const curriculumMapMatches = [...text.matchAll(/Unit\s*\d*\s*Curriculum Map/gi)];
+  if (curriculumMapMatches.length > 0) {
+    const lastMatch = curriculumMapMatches[curriculumMapMatches.length - 1];
+    positions.push({ label: lastMatch[0], idx: lastMatch.index! });
+  }
+  positions.sort((a, b) => a.idx - b.idx);
+
+  // Chosen priority codes are needed up front to know how many times to
+  // repeat the Learning Targets answers row - re-derive them the same way
+  // parseUnitMapRawText itself will, from this same section's raw text.
+  const priorityPos = positions.find((p) => p.label === "CHOOSE PRIORITY STANDARD(S)");
+  let chosenCodeCount = 1;
+  if (priorityPos) {
+    const nextIdx = positions.find((p) => p.idx > priorityPos.idx)?.idx ?? text.length;
+    const priorityText = text.slice(priorityPos.idx + priorityPos.label.length, nextIdx);
+    const found = extractCodes(priorityText);
+    if (found.length > 0) chosenCodeCount = found.length;
+  }
+
+  const rows: string[][] = [];
+  for (let i = 0; i < positions.length; i++) {
+    const { label, idx } = positions[i];
+    const contentStart = idx + label.length;
+    // The Curriculum Map section is always structurally last in this
+    // template - its own data can genuinely be the only place some
+    // labels (e.g. "Determine Pre-Assessment") appear at all in a given
+    // document, with no earlier, separate occurrence to anchor on. Using
+    // the generic "next label" logic there truncated the section early,
+    // cutting off real data. Always extend it to the end of the document
+    // instead.
+    const isCurriculumMapLabel = /^Unit\s*\d*\s*Curriculum Map/i.test(label);
+    const contentEnd = isCurriculumMapLabel ? text.length : (i + 1 < positions.length ? positions[i + 1].idx : text.length);
+    const rawContent = text.slice(contentStart, contentEnd);
+
+    if (label === "Plan Start Date:") {
+      // Both dates combine into a single 4-cell row - [label, startDate,
+      // "Projected End Date...", endDate] - matching exactly what
+      // parseUnitMapRawText reads via rows[idx][1] and rows[idx][3].
+      const endLabel = "Projected End Date Based on Projection Map:";
+      const endLabelIdx = rawContent.indexOf(endLabel);
+      const startDate = (endLabelIdx >= 0 ? rawContent.slice(0, endLabelIdx) : rawContent).replace(/\n/g, " ").trim();
+      const endDate = (endLabelIdx >= 0 ? rawContent.slice(endLabelIdx + endLabel.length) : "").replace(/\n/g, " ").trim();
+      rows.push([label, startDate, endLabel, endDate]);
+    } else if (label === "Mark the standard type/s") {
+      // Preserve raw cell boundaries, including genuinely-empty cells -
+      // collapsing them would misalign the fixed 8-cell shape this needs.
+      const cells = rawContent.split("\n\t").map((c) => c.replace(/\n/g, " ").trim());
+      rows.push([label, ...cells]);
+    } else if (label === "Identify Learning Targets") {
+      // Same whitespace-only-cell issue as Unit Curriculum Map below -
+      // filtering first makes the fixed offset robust to documents with
+      // extra blank-line cells a real document didn't have.
+      const cells = rawContent.split("\n\t").map((c) => c.replace(/\n/g, " ").trim()).filter((c) => c !== "");
+      // After filtering: cells[0..3]=category labels, [4..7]=prompts,
+      // [8..11]=real answers - confirmed directly against the exact raw
+      // cell indices of a real document before fixing an initial off-by-
+      // one here.
+      const answers = [cells[8] || "", cells[9] || "", cells[10] || "", cells[11] || ""];
+      rows.push([label]);
+      rows.push(["Knowledge Targets", "Reasoning Targets", "Performance Skill Targets", "Product Targets"]);
+      rows.push(["prompt1", "prompt2", "prompt3", "prompt4"]);
+      for (let n = 0; n < chosenCodeCount; n++) rows.push([...answers]);
+    } else if (/^Unit\s*\d*\s*Curriculum Map/i.test(label)) {
+      // Some documents have extra whitespace-only cells (a lone blank
+      // line becomes its own "\n\t"-delimited cell) that a real document
+      // didn't have, shifting every subsequent index by however many
+      // extra blank cells exist. Filtering them out first makes the
+      // fixed 5-header + 5-instructions = 10-cell offset below robust to
+      // that variation, confirmed against both the original working
+      // document (no blank cells, unaffected by this filter) and the one
+      // that surfaced this gap (extra blank cells, only resolved by it).
+      const cells = rawContent.split("\n\t").map((c) => c.replace(/\n{2,}/g, ", ").replace(/\n/g, " ").trim()).filter((c) => c !== "");
+      rows.push(["Standards", "Content and Vocabulary", "Learning Targets", "Assessments", "Instructional Strategies"]);
+      rows.push(["(instructions)", "(instructions)", "(instructions)", "(instructions)", "(instructions)"]);
+      const stopLabels = ["Determine Pre-Assessment", "Pre-Assessment Scoring Agreements", "Determine Post Assessment", "Post Assessment Scoring Agreements"];
+      for (let n = 10; n < cells.length; n += 5) {
+        const group = cells.slice(n, n + 5);
+        // A document can restate one of these exact labels as part of its
+        // own Curriculum Map row content (e.g. an Assessments cell titled
+        // "Determine Pre-Assessment"). Since this section's contentEnd
+        // extends to the end of the document (see above), letting such a
+        // group through as a real curriculumRow would push it into `rows`
+        // BEFORE that same label's own, dedicated, later position gets
+        // processed - and findRowIndex always returns the first match, so
+        // this spurious row would incorrectly win over the real one.
+        // A document can restate one of these exact labels as a substring
+        // within a real curriculumRow's own cell content (e.g. an
+        // Instructional Strategies cell that happens to end with
+        // "Determine Pre-Assessment"). Since this section's contentEnd
+        // extends to the end of the document (see above), that label text
+        // must not be pushed into `rows` as-is: findRowIndex matches
+        // ANY cell containing the search text, so it would make this
+        // spurious, earlier row incorrectly win over that same label's
+        // real, dedicated, later position. Stripping just the matched
+        // substring (not the whole cell) preserves genuinely real
+        // surrounding content; a group left entirely empty by that
+        // stripping is a signal that this whole group WAS that other,
+        // later section's content, not real curriculum data - stop there.
+        // Two genuinely different situations produce a stop-label match,
+        // and they need opposite handling:
+        // (1) group[0] (the Standards column) is EXACTLY one of these
+        //     labels, the whole cell and nothing else - this marks the
+        //     true start of that other, separate, dedicated section
+        //     (e.g. the real "Determine Pre-Assessment" field, which can
+        //     immediately follow this one in the document), not real
+        //     curriculum data. Discard the whole group and stop here.
+        // (2) The label is embedded within a longer, substantive cell
+        //     (e.g. an Instructional Strategies cell ending with
+        //     "...Determine Pre-Assessment") - this genuinely IS part of
+        //     a real curriculumRow's own content. Strip just that
+        //     substring, keep the rest, and still stop after - either
+        //     way, nothing past this point is trustworthy as more
+        //     curriculum data once a stop label has appeared anywhere.
+        const hasStopLabel = group.some((c) => stopLabels.some((l) => c.includes(l)));
+        if (hasStopLabel) {
+          const isSeparateSection = stopLabels.includes(group[0]);
+          if (!isSeparateSection) {
+            const stripped = group.map((c) => {
+              let result = c;
+              for (const l of stopLabels) result = result.startsWith(l) ? "" : result.replace(l, "");
+              return result.trim();
+            });
+            if (stripped.some((c) => c)) rows.push(stripped);
+          }
+          break;
+        }
+        if (group.some((c) => c.trim())) rows.push(group);
+      }
+    } else {
+      const cleanContent = rawContent.replace(/\n/g, " ").replace(/\s+/g, " ").trim();
+      // Different fields in parseUnitMapRawText read their content from
+      // different cell positions - some from this same row's second cell
+      // (e.g. "List the nouns..."), others from the NEXT row's first cell
+      // (e.g. "CHOOSE PRIORITY STANDARD(S)"). Rather than track which
+      // convention each individual field uses, emit the content in both
+      // positions so either read finds it correctly. Supporting Standards
+      // also gets relabeled to "List Supporting Standards" - the document's
+      // own text reads "Supporting Standards in this Unit", but that's not
+      // what parseUnitMapRawText actually searches for; this label is
+      // purely internal to this converter's output, never shown to anyone,
+      // so renaming it to match costs nothing and avoids the mismatch.
+      const outputLabel = label === "Supporting Standards in this Unit" ? "List Supporting Standards" : label;
+      rows.push([outputLabel, cleanContent]);
+      rows.push([cleanContent]);
+    }
+  }
+  // parseUnitMapRawText expects pipe-delimited text (it calls parseRows
+  // internally), not pre-parsed rows - convert to that exact format,
+  // escaping any literal "|" in cell text so it can't be misread as an
+  // extra cell boundary.
+  return rows
+    .map((cells) => "| " + cells.map((c) => c.replace(/\|/g, "/")).join(" | ") + " |")
+    .join("\n");
+}
+
 export interface ParsedUnitMap extends UnitMap {
   allStandardsCodes: string[];
   chosenPriorityCodes: string[];
@@ -72,8 +292,8 @@ export function parseRows(rawText: string): string[][] {
 export function extractCodes(text: string): string[] {
   const t = cleanMarkdownLinks(text);
   const patterns: { re: RegExp; normalize?: (raw: string) => string; isBareDigit?: boolean }[] = [
-    { re: /(?<!\d)(?:\d{1,2}|K)\.[A-Z]{1,4}\.\d{1,2}(?:\.\d{1,2})?/g }, // 6.RP.1, 6.NS.3, K.CC.A.1, K.OA.A.1 (Kindergarten-level codes use the letter "K" in place of a numeric grade - no other pattern below recognized this at all, which meant EVERY Kindergarten standard code in every subject silently extracted as zero codes until this was added)
-    { re: /(?<!\d)(?:\d{1,2}|K)\.[A-Z]{1,4}\.\s?[A-Z]\.\d{1,2}(?:\.\d{1,2})?/g, normalize: (raw: string) => raw.replace(/\s+/g, "") }, // 5.NBT.A.1, 5.MD.C.3, K.NBT.A.1 (official CCSS Math format with a cluster letter between domain and standard number - coexists with the shorter 3-part form for the same standard within the same document; tolerates an occasional space before the cluster letter, e.g. "5.NBT. B.7", seen where a source cell's paragraph break gets joined with a space)
+    { re: /(?<!\d)(?:\d{1,2}|K)\.\s?[A-Z]{1,4}\.\d{1,2}(?:\.\d{1,2})?/g }, // 6.RP.1, 6.NS.3, K.CC.A.1, K.OA.A.1, "2. NBT.A.1" (Kindergarten-level codes use the letter "K" in place of a numeric grade - no other pattern below recognized this at all, which meant EVERY Kindergarten standard code in every subject silently extracted as zero codes until this was added; a real document also had a space after the grade number's own period)
+    { re: /(?<!\d)(?:\d{1,2}|K)\.\s?[A-Z]{1,4}\.\s?[A-Z]\.\d{1,2}(?:\.\d{1,2})?/g, normalize: (raw: string) => raw.replace(/\s+/g, "") }, // 5.NBT.A.1, 5.MD.C.3, K.NBT.A.1 (official CCSS Math format with a cluster letter between domain and standard number - coexists with the shorter 3-part form for the same standard within the same document; tolerates an occasional space before the cluster letter, e.g. "5.NBT. B.7", seen where a source cell's paragraph break gets joined with a space)
     { re: /(?<![A-Z])ELD\.[A-Z]{1,3}\.\d{1,2}\.\d{1,2}/g }, // ELD.PI.8.1
     { re: /(?<![A-Z])MP\.\d{1,2}/g }, // MP.1
     { re: /(?<![A-Z])[A-Z]{1,2}-[A-Z]{2,4}\d-\d{1,2}(?!\d)/g }, // MS-LS1-1, MS-ETS1-4 (NGSS-style; both boundaries use lookarounds - not \b - since these are sometimes glued directly to surrounding words with no space)
