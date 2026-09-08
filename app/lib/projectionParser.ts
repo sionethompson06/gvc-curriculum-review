@@ -123,7 +123,52 @@ function buildEntriesForCell(cellTextWithMarks: string, hasHighlightData: boolea
   return [{ code: codes.join(", "), desc: plainText, priority: false, priorityUnclear: true, needsSupplement, partial: false }];
 }
 
+// A Word table that spans a page break stays ONE continuous table in the
+// underlying document, but a real document restarts with a fresh header
+// row wherever a new page's block of units begins (e.g. row 0 introduces
+// "Beginning of school" + Units 1-6, then several rows of strand data
+// later, row 7 - with an empty label cell just like ordinary continuation
+// rows - actually introduces Units 7-12 in its OTHER cells). Naively
+// treating everything after row 1 as strand data for the original units
+// would silently merge a completely different set of units' standards
+// into the wrong columns. Detected by checking whether at least half of a
+// row's non-label cells match "Unit N" - strand data rows never do, since
+// real content there is either blank, a bare date, or standards prose.
+function isSecondaryHeaderRow(row: string[]): boolean {
+  const dataCells = row.slice(1).map((c) => cleanCellText((c || "").replace(/<\/?mark>/gi, "")));
+  const nonEmpty = dataCells.filter((c) => c.trim());
+  if (nonEmpty.length === 0) return false;
+  const unitLike = dataCells.filter((c) => /^\s*Unit\s+\d+/i.test(c));
+  return unitLike.length >= Math.max(2, Math.ceil(nonEmpty.length / 2));
+}
+
 function buildProjectionMapFromRows(rows: string[][], hasHighlightData = false): ParsedProjectionMap {
+  if (rows.length < 2) return { units: [], strandNames: [] };
+
+  // Split into sections wherever a secondary header row appears - row 0 is
+  // always the start of the first section regardless of its own content.
+  const sectionStarts = [0];
+  for (let r = 2; r < rows.length; r++) {
+    if (isSecondaryHeaderRow(rows[r])) sectionStarts.push(r);
+  }
+
+  const allUnits: ParsedProjectionUnit[] = [];
+  const allStrandNames: string[] = [];
+  for (let s = 0; s < sectionStarts.length; s++) {
+    const sectionRows = rows.slice(sectionStarts[s], s + 1 < sectionStarts.length ? sectionStarts[s + 1] : rows.length);
+    const section = buildProjectionMapSection(sectionRows, hasHighlightData);
+    allUnits.push(...section.units);
+    for (const name of section.strandNames) if (!allStrandNames.includes(name)) allStrandNames.push(name);
+  }
+  return { units: allUnits, strandNames: allStrandNames };
+}
+
+/** Parses one section's worth of rows (starting with its own header row at
+ * index 0) - this is the original single-section logic, unchanged, now
+ * scoped to a row range rather than assuming it always spans the whole
+ * table. See buildProjectionMapFromRows for why a table can contain more
+ * than one such section. */
+function buildProjectionMapSection(rows: string[][], hasHighlightData: boolean): ParsedProjectionMap {
   if (rows.length < 2) return { units: [], strandNames: [] };
 
   // Row 0: header row - first cell is a grade/title label (skipped), the
@@ -350,5 +395,27 @@ export function parseProjectionMapFromHtml(html: string, tableIndex = 0): Parsed
   const rows = parseRowsFromHtml(html, tableIndex);
   const hasHighlightData = rows.some((row) => row.some((cell) => /<mark>/i.test(cell)));
   return buildProjectionMapFromRows(rows, hasHighlightData);
+}
+
+/** Merges results across multiple, genuinely separate <table> elements in
+ * one document - distinct from buildProjectionMapFromRows' mid-table
+ * secondary-header handling above, which covers a table that merely spans
+ * a page break and stays one continuous table internally. A real
+ * document's final page (its last few units) can instead land in its own,
+ * separate table with a different column count/layout than the main one
+ * (e.g. an extra leading blank column before the single real unit name) -
+ * still parsed correctly by the existing per-table logic, just requiring
+ * the caller to explicitly list which table indices belong to this same
+ * projection map (skipping, e.g., a trailing legend/notes table) rather
+ * than guessing which of a document's tables are relevant. */
+export function parseProjectionMapMultiTable(html: string, tableIndices: number[]): ParsedProjectionMap {
+  const allUnits: ParsedProjectionUnit[] = [];
+  const allStrandNames: string[] = [];
+  for (const idx of tableIndices) {
+    const result = parseProjectionMapFromHtml(html, idx);
+    allUnits.push(...result.units);
+    for (const name of result.strandNames) if (!allStrandNames.includes(name)) allStrandNames.push(name);
+  }
+  return { units: allUnits, strandNames: allStrandNames };
 }
 
