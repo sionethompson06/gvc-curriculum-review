@@ -112,11 +112,17 @@ export function googleDocsUnitMapToPipeText(rawText: string): string {
     if (label === "Plan Start Date:") {
       // Both dates combine into a single 4-cell row - [label, startDate,
       // "Projected End Date...", endDate] - matching exactly what
-      // parseUnitMapRawText reads via rows[idx][1] and rows[idx][3].
+      // parseUnitMapRawText reads via rows[idx][1] and rows[idx][3]. Each
+      // date value ends at the next cell boundary ("\n\t"), not at the
+      // next known label - some documents have stray text (e.g. a
+      // repeated unit title) between the end date and the next label
+      // with no label of its own, which got swept into the date if this
+      // took everything up to that next label.
       const endLabel = "Projected End Date Based on Projection Map:";
       const endLabelIdx = rawContent.indexOf(endLabel);
-      const startDate = (endLabelIdx >= 0 ? rawContent.slice(0, endLabelIdx) : rawContent).replace(/\n/g, " ").trim();
-      const endDate = (endLabelIdx >= 0 ? rawContent.slice(endLabelIdx + endLabel.length) : "").replace(/\n/g, " ").trim();
+      const startDate = ((endLabelIdx >= 0 ? rawContent.slice(0, endLabelIdx) : rawContent).split("\n\t")[1] || "").replace(/\n/g, " ").trim();
+      const endDateRaw = endLabelIdx >= 0 ? rawContent.slice(endLabelIdx + endLabel.length) : "";
+      const endDate = (endDateRaw.split("\n\t")[1] || "").replace(/\n/g, " ").trim();
       rows.push([label, startDate, endLabel, endDate]);
     } else if (label === "Mark the standard type/s") {
       // Preserve raw cell boundaries, including genuinely-empty cells -
